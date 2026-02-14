@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- Rewrite README "How It Works" to explain the full two-phase pipeline (analyze + commit), including backup, remote save/restore, hash-based rewrite, artifact commit, and optional force-push
+- Add Compatibility section to README documenting support for GitHub, GitLab, Azure DevOps, Bitbucket, and any standard Git remote
+- Expand Safety section with remote restore and explicit push-only behaviour
+
+### Fixed
+
+- Correct Python version requirement from 3.10+ to 3.11+ across all docs (matches pyproject.toml)
+- Correct default `--model` from `sonnet` to `opus` in README and COMMANDS.md
+- Document missing `--push` flag in README and COMMANDS.md command tables
+- Correct `--verbose` description to "per-commit hash details" instead of "progress and token usage"
+- Update rewriter.py module docstring from `--message-callback` to `--commit-callback`
+- Update cache.py docstring to remove references to .gitignore creation that no longer occurs
+
 ## [0.1.0] - 2026-02-14
 
 ### Added

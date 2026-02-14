@@ -6,7 +6,7 @@ Many repositories accumulate lazy commit messages — "etc", "fix", "wip", "upda
 
 ## Prerequisites
 
-- **Python 3.10+**
+- **Python 3.11+**
 - **Claude Code CLI** — gitre calls Claude through the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-code-sdk), which wraps the Claude Code CLI. You need Claude Code installed and authenticated (either via API key or a Claude Max/Pro subscription).
 - **git-filter-repo** — used for history rewriting (`gitre commit` / `--live`). Installed automatically as a dependency.
 
@@ -24,16 +24,37 @@ This installs gitre along with its dependencies:
 
 ## How It Works
 
-gitre uses the **Claude Agent SDK** (`claude-agent-sdk`) to call Claude through the Claude Code CLI. When `ANTHROPIC_API_KEY` is not set in your environment, it automatically uses your Claude Max/Pro subscription — meaning no separate API costs.
+gitre operates in two phases: **analyze** (read diffs, call Claude, cache proposals) and **commit** (rewrite history with the improved messages). These can run separately or be chained with `--live`.
 
-The SDK is configured with:
-- **`bypassPermissions`** mode — gitre only reads diffs, it doesn't write files through Claude
+### 1. Analyze — Generate proposals
+
+1. **Walk history** — `git log --reverse` extracts every commit in the range (oldest first)
+2. **Extract diffs** — Each commit's unified diff and `--stat` are pulled via `git diff`. Root commits diff against the empty tree; merge commits are skipped. Patches over 50 KB are truncated.
+3. **Call Claude** — Each diff (or a batch of diffs) is sent to Claude via the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-code-sdk) with a JSON schema requesting an imperative-mood subject line (max 72 chars), optional body, and a categorized changelog entry (Added/Changed/Fixed/Removed/Deprecated/Security).
+4. **Cache results** — Proposals are saved to `.gitre/analysis.json` inside the target repo so you can review before committing.
+
+### 2. Commit — Rewrite history
+
+1. **Create backup** — A branch `gitre-backup-{timestamp}` is created at HEAD so you can always recover.
+2. **Save remotes** — All remote URLs are captured (because `git-filter-repo` strips them during rewrite).
+3. **Rewrite commits** — `git filter-repo --force --commit-callback` rewrites each commit message. The callback matches commits by their **original hash** (`commit.original_id`), not by message content — so even repos full of identical "etc" messages get the right replacement. The callback script is written to a temp file to avoid Windows command-line length limits.
+4. **Restore remotes** — The saved remote URLs are re-added to the repo.
+5. **Commit artifacts** — The `.gitre/` cache and any generated changelog are committed with a clean message.
+6. **Force-push** (optional) — With `--push`, gitre force-pushes the rewritten history to the remote.
+
+### Claude SDK configuration
+
+gitre calls Claude through the Claude Code CLI. When `ANTHROPIC_API_KEY` is not set in your environment, it automatically uses your Claude Max/Pro subscription — meaning no separate API costs.
+
+- **`bypassPermissions`** mode with `allowed_tools=["Read"]` — gitre only reads diffs, it doesn't write files through Claude
 - **`output_format`** JSON schemas — for structured, parseable responses
 - **Stripped `ANTHROPIC_API_KEY`** — forces the SDK to use your Max subscription rather than an API key
 - **Low `max_turns` (3)** — gitre only needs Claude to read a diff and produce JSON, not run multi-step workflows
 - **10 MB buffer** — large diffs need room
 
-Each commit's diff is sent to Claude with a prompt requesting an imperative-mood commit message and a categorized changelog entry. Claude responds with structured JSON that gitre parses into its internal models.
+### Compatibility
+
+gitre works with any standard Git remote — **GitHub**, **GitLab**, **Azure DevOps**, **Bitbucket**, self-hosted servers, or bare repos. It uses only standard Git operations (`git log`, `git diff`, `git filter-repo`, `git remote`, `git push`) with no platform-specific API calls.
 
 ## Usage
 
@@ -71,9 +92,10 @@ Walks the commit history, sends each diff to Claude, and generates proposed comm
 | `--to` | Ending commit hash or ref (default: HEAD) |
 | `--live` | Immediately rewrite history and write changelog |
 | `--out-file` / `-f` | Write changelog to file (e.g. `CHANGELOG.md`) |
-| `--model` | Claude model: `sonnet`, `opus`, `haiku` (default: `sonnet`) |
+| `--model` | Claude model: `sonnet`, `opus`, `haiku` (default: `opus`) |
 | `--batch-size` | Commits per Claude call (default: 1) |
-| `--verbose` / `-v` | Show progress and token usage |
+| `--verbose` / `-v` | Show per-commit hash details during analysis |
+| `--push` | Force-push to remote after rewriting (requires `--live`) |
 
 #### `gitre commit [repo_path]`
 
@@ -85,6 +107,7 @@ Applies cached proposals from a previous `gitre analyze`. Does **not** re-call C
 | `--skip` | Comma-separated short hashes to skip |
 | `--changelog` / `-f` | Also write changelog to this path |
 | `--yes` / `-y` | Skip confirmation prompt |
+| `--push` | Force-push to remote after rewriting history |
 
 ### More Examples
 
@@ -108,15 +131,19 @@ gitre commit /path/to/repo --skip abc1234
 
 # Scripted / CI
 gitre commit /path/to/repo -f CHANGELOG.md -y
+
+# One-shot with force-push
+gitre analyze /path/to/repo --live -f CHANGELOG.md --push
 ```
 
 ## Safety
 
 Before any history rewrite, gitre:
 
-1. Creates a backup branch (`gitre-backup-{timestamp}`)
-2. Prompts for explicit confirmation (unless `-y`)
-3. Reminds you that a force push is needed afterward
+1. Creates a backup branch (`gitre-backup-{timestamp}`) — restore with `git reset --hard gitre-backup-*`
+2. Saves and restores all remote URLs (filter-repo strips them)
+3. Prompts for explicit confirmation (unless `-y`)
+4. Never force-pushes unless you explicitly pass `--push`
 
 ## Project Structure
 
