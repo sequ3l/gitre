@@ -6,7 +6,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
 # Valid changelog categories per Keep a Changelog convention
 CHANGELOG_CATEGORIES = frozenset(
     {"Added", "Changed", "Fixed", "Removed", "Deprecated", "Security"}
@@ -46,7 +45,10 @@ class GeneratedMessage(BaseModel):
     body: str | None = None
     changelog_category: str = Field(
         ...,
-        description="Changelog category: one of Added, Changed, Fixed, Removed, Deprecated, or Security.",
+        description=(
+            "Changelog category: one of Added, Changed, Fixed, "
+            "Removed, Deprecated, or Security."
+        ),
     )
     changelog_entry: str
 

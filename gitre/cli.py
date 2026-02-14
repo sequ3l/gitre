@@ -13,14 +13,14 @@ from __future__ import annotations
 import asyncio
 import subprocess
 import sys
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 import typer
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from gitre import analyzer, cache, formatter, generator, rewriter
+from gitre import analyzer, cache, formatter, generator, labeler, rewriter
 from gitre.models import AnalysisResult, CommitInfo, GeneratedMessage
 
 app = typer.Typer(
@@ -41,7 +41,7 @@ _console = Console()
 # ---------------------------------------------------------------------------
 
 
-class OutputFormat(str, Enum):
+class OutputFormat(StrEnum):
     """Selects which sections to include in the formatted output."""
 
     changelog = "changelog"
@@ -335,6 +335,133 @@ def commit(
         filtered_messages=messages,
         push=push,
     )
+
+
+# ---------------------------------------------------------------------------
+# label command
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def label(
+    repo_path: str = typer.Argument(
+        ".",
+        help="Path to the git repository (defaults to current directory).",
+    ),
+    all_changes: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        help="Stage all changes before generating (like git commit -a).",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip confirmation prompt.",
+    ),
+    push: bool = typer.Option(
+        False,
+        "--push",
+        help="Push to remote after committing.",
+    ),
+    model: str = typer.Option(
+        "opus",
+        "--model",
+        help="Claude model to use for label generation.",
+    ),
+) -> None:
+    """Generate a commit message for staged changes and commit."""
+    # --- 1. Validate repo ---
+    _validate_git_repo(repo_path)
+
+    # --- 2. Stage all if requested ---
+    if all_changes:
+        subprocess.run(
+            ["git", "add", "-A"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+    # --- 3. Check for staged changes ---
+    status = subprocess.run(
+        ["git", "diff", "--cached", "--quiet"],
+        cwd=repo_path,
+        capture_output=True,
+        check=False,
+    )
+    if status.returncode == 0:
+        typer.echo("No staged changes to label.")
+        raise typer.Exit(0)
+
+    # --- 4. Generate label ---
+    _console.print("[cyan]Generating commit message for staged changes…[/cyan]")
+
+    async def _gen() -> GeneratedMessage:
+        return await labeler.generate_label(repo_path, model=model)
+
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=_console,
+        ) as progress:
+            progress.add_task("Analysing…", total=None)
+            msg = asyncio.run(_gen())
+    except RuntimeError as exc:
+        typer.echo(f"Error generating label: {exc}", err=True)
+        raise typer.Exit(1)
+
+    # --- 5. Display proposal ---
+    _console.print()
+    _console.print(f"[green bold]Subject:[/green bold] {msg.subject}")
+    if msg.body:
+        _console.print(f"[dim]Body:[/dim]    {msg.body}")
+    _console.print(
+        f"[magenta]Category:[/magenta] {msg.changelog_category}"
+    )
+    _console.print()
+
+    # --- 6. Confirm ---
+    if not yes:
+        if not typer.confirm("Commit with this message?", default=True):
+            typer.echo("Aborted.")
+            raise typer.Exit(0)
+
+    # --- 7. Commit ---
+    message = msg.subject
+    if msg.body:
+        message = f"{msg.subject}\n\n{msg.body}"
+
+    try:
+        subprocess.run(
+            ["git", "commit", "-m", message],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        _console.print(f"[green]Committed:[/green] {msg.subject}")
+    except subprocess.CalledProcessError as exc:
+        typer.echo(f"Error committing: {exc}", err=True)
+        raise typer.Exit(1)
+
+    # --- 8. Push (optional) ---
+    if push:
+        try:
+            subprocess.run(
+                ["git", "push"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            _console.print("[green]Pushed to remote.[/green]")
+        except subprocess.CalledProcessError as exc:
+            typer.echo(f"Error pushing: {exc}", err=True)
+            raise typer.Exit(1)
 
 
 # ---------------------------------------------------------------------------

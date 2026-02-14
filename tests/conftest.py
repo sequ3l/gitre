@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import subprocess
 import textwrap
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -22,7 +22,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from gitre.models import AnalysisResult, CommitInfo, GeneratedMessage
-
 
 # ---------------------------------------------------------------------------
 # Helpers for async-iterable mocking
@@ -247,7 +246,7 @@ def sample_commit() -> CommitInfo:
         hash="abc1234567890abcdef1234567890abcdef123456",
         short_hash="abc1234",
         author="Test Author <test@example.com>",
-        date=datetime(2026, 2, 12, 16, 45, 0, tzinfo=timezone.utc),
+        date=datetime(2026, 2, 12, 16, 45, 0, tzinfo=UTC),
         original_message="etc",
         diff_stat=" src/main.py | 10 +++++++---\n 1 file changed, 7 insertions(+), 3 deletions(-)",
         diff_patch=(
@@ -279,7 +278,7 @@ def sample_commit_2() -> CommitInfo:
         hash="def5678901234567890abcdef1234567890abcdef",
         short_hash="def5678",
         author="Test Author <test@example.com>",
-        date=datetime(2026, 2, 12, 17, 13, 0, tzinfo=timezone.utc),
+        date=datetime(2026, 2, 12, 17, 13, 0, tzinfo=UTC),
         original_message="fix",
         diff_stat=" README.md | 3 ++-\n 1 file changed, 2 insertions(+), 1 deletion(-)",
         diff_patch=(
@@ -311,7 +310,7 @@ def sample_commit_info() -> CommitInfo:
         hash="f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0",
         short_hash="f1a2b3c",
         author="Jane Doe <jane@example.com>",
-        date=datetime(2026, 2, 14, 9, 30, 0, tzinfo=timezone.utc),
+        date=datetime(2026, 2, 14, 9, 30, 0, tzinfo=UTC),
         original_message="stuff",
         diff_stat=(
             " src/app.py   | 15 +++++++++++----\n"
@@ -415,7 +414,10 @@ def sample_generated_message() -> GeneratedMessage:
         hash="abc1234567890abcdef1234567890abcdef123456",
         short_hash="abc1234",
         subject="Add argument parsing to main entry point",
-        body="Extend main() to accept and display command-line arguments.\n\nThis allows users to pass flags at the CLI.",
+        body=(
+            "Extend main() to accept and display command-line arguments."
+            "\n\nThis allows users to pass flags at the CLI."
+        ),
         changelog_category="Added",
         changelog_entry="Command-line argument parsing in the main entry point.",
     )
@@ -461,5 +463,5 @@ def sample_analysis_result() -> AnalysisResult:
         },
         total_tokens=4500,
         total_cost=0.0135,
-        analyzed_at=datetime(2026, 2, 14, 12, 0, 0, tzinfo=timezone.utc),
+        analyzed_at=datetime(2026, 2, 14, 12, 0, 0, tzinfo=UTC),
     )

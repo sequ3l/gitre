@@ -99,6 +99,43 @@ gitre commit /path/to/repo -f CHANGELOG.md -y --push
 
 ---
 
+## `gitre label [repo_path]`
+
+Generate a commit message for staged changes and commit. Unlike `analyze`/`commit` which rewrite history, `label` works on your current working tree — the day-to-day workflow.
+
+### Arguments
+
+| Argument | Description |
+|---|---|
+| `repo_path` | Path to the git repository. Defaults to current directory. |
+
+### Options
+
+| Option | Short | Default | Description |
+|---|---|---|---|
+| `--all` | `-a` | | Stage all changes before generating (like `git commit -a`) |
+| `--yes` | `-y` | | Skip confirmation prompt |
+| `--push` | | | Push to remote after committing |
+| `--model` | | `opus` | Claude model to use: `sonnet`, `opus`, `haiku` |
+
+### Examples
+
+```bash
+# Label staged changes (default: current directory)
+gitre label .
+
+# Stage everything and label
+gitre label . --all
+
+# Skip confirmation and push
+gitre label . -y --push
+
+# Use a faster/cheaper model
+gitre label . --model sonnet
+```
+
+---
+
 ## Typical Workflows
 
 ### The Full Monty (one shot)

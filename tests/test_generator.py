@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -28,7 +28,6 @@ from gitre.generator import (
 from gitre.models import CommitInfo, GeneratedMessage
 from tests.conftest import make_mock_query
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -40,7 +39,7 @@ def _make_commit(**overrides: object) -> CommitInfo:
         "hash": "a" * 40,
         "short_hash": "a" * 7,
         "author": "Test Author <test@example.com>",
-        "date": datetime(2026, 2, 12, 16, 45, 0, tzinfo=timezone.utc),
+        "date": datetime(2026, 2, 12, 16, 45, 0, tzinfo=UTC),
         "original_message": "etc",
         "diff_stat": " file.py | 3 ++-\n 1 file changed",
         "diff_patch": "diff --git a/file.py b/file.py\n+hello\n",

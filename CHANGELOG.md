@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Add `gitre label` command: generate AI-powered commit messages for staged changes and commit in one step, with `--all` to stage everything, `--push` for regular push, and `--model` to pick the Claude model.
 - Initial release of gitre CLI with `analyze` and `commit` commands for AI-powered git commit message reconstruction, Keep a Changelog output, cache management, git-filter-repo history rewriting, and a full test suite.
 - README with prerequisites, Claude Code / Agent SDK integration details, full command reference with option tables, usage examples, safety notes, and project structure overview.
 - CLAUDE.md project instructions with workflow reminders and Claude Agent SDK configuration notes.

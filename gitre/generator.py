@@ -12,6 +12,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from gitre.models import CommitInfo, GeneratedMessage
 
@@ -172,7 +173,7 @@ def _build_batch_prompt(commits: list[CommitInfo]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _extract_json(text: str) -> dict | list:
+def _extract_json(text: str) -> dict[str, Any] | list[Any]:
     """Extract JSON from Claude's response using multiple fallback strategies.
 
     Strategy 1: Direct ``json.loads`` on the full text.
@@ -280,7 +281,7 @@ def _extract_json(text: str) -> dict | list:
     )
 
 
-def _validate_json_keys(data: dict | list) -> bool:
+def _validate_json_keys(data: dict[str, Any] | list[Any]) -> bool:
     """Check that the extracted JSON contains expected keys.
 
     Prevents extracting random JSON objects from prose. For a single
@@ -357,8 +358,8 @@ def _ensure_sdk() -> None:
 def _build_options(
     cwd: str,
     model: str,
-    output_schema: dict,
-) -> ClaudeAgentOptions:  # type: ignore[valid-type]
+    output_schema: dict[str, Any],
+) -> ClaudeAgentOptions:
     """Build ``ClaudeAgentOptions`` with all required SDK settings.
 
     Follows every SDK gotcha from the directive:
@@ -385,7 +386,7 @@ async def _call_claude(
     prompt: str,
     cwd: str,
     model: str,
-    output_schema: dict,
+    output_schema: dict[str, Any],
 ) -> tuple[str, int, float]:
     """Low-level wrapper around ``query()`` that returns (text, tokens, cost).
 
@@ -418,7 +419,7 @@ async def _call_claude(
 
 
 def _parse_single_response(
-    raw: dict,
+    raw: dict[str, Any],
     commit: CommitInfo,
 ) -> GeneratedMessage:
     """Convert a raw JSON dict into a ``GeneratedMessage``, filling in

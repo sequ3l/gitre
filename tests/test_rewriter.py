@@ -10,7 +10,7 @@ suite stays green on machines without the tool installed.
 from __future__ import annotations
 
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -27,13 +27,11 @@ from gitre.rewriter import (
     create_backup,
     display_proposals,
     force_push,
-    get_install_instructions,
     restore_remotes,
     rewrite_history,
     save_remotes,
     write_changelog,
 )
-
 
 # ---------------------------------------------------------------------------
 # Detect git-filter-repo availability for skipif markers
@@ -94,7 +92,7 @@ def _make_commit(
         hash=hash,
         short_hash=short_hash,
         author="Test User",
-        date=datetime(2024, 1, 15, tzinfo=timezone.utc),
+        date=datetime(2024, 1, 15, tzinfo=UTC),
         original_message=original_message,
         diff_stat="1 file changed, 2 insertions(+)",
         diff_patch="diff --git ...",
@@ -322,7 +320,10 @@ class TestSaveRemotes:
         """Should parse origin fetch URL from git remote -v output."""
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout="origin\thttps://github.com/user/repo.git (fetch)\norigin\thttps://github.com/user/repo.git (push)\n",
+            stdout=(
+                "origin\thttps://github.com/user/repo.git (fetch)\n"
+                "origin\thttps://github.com/user/repo.git (push)\n"
+            ),
         )
         result = save_remotes("/fake/repo")
         assert result == {"origin": "https://github.com/user/repo.git"}
@@ -506,7 +507,10 @@ class TestWriteChangelog:
 
     def test_writes_utf8_content(self, tmp_path: Path) -> None:
         """Should handle unicode content correctly."""
-        content = "# Changelog\n\n- Fixed encoding bug \u2014 special chars: \u00e9\u00e0\u00fc\u00f1"
+        content = (
+            "# Changelog\n\n"
+            "- Fixed encoding bug \u2014 special chars: \u00e9\u00e0\u00fc\u00f1"
+        )
         write_changelog(str(tmp_path), content, "CHANGELOG.md")
         target = tmp_path / "CHANGELOG.md"
         assert target.read_text(encoding="utf-8") == content
@@ -712,7 +716,6 @@ class TestRewriteHistoryIntegration:
         parts = result.stdout.strip().split(" ", 2)
         full_hash = parts[0]
         short_hash = parts[1]
-        old_subject = parts[2]
 
         msg = _make_msg(
             hash=full_hash,

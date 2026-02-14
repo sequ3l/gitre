@@ -22,16 +22,12 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from gitre.analyzer import (
     enrich_commit,
     get_commits,
     get_diff,
     truncate_diff,
 )
-from gitre.models import CommitInfo
-
 
 # ---------------------------------------------------------------------------
 # Helpers

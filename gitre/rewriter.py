@@ -12,7 +12,7 @@ import platform
 import subprocess
 import tempfile
 import textwrap
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -106,7 +106,7 @@ def create_backup(repo_path: str) -> str:
     subprocess.CalledProcessError
         If the ``git branch`` command fails.
     """
-    timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
     branch_name = f"gitre-backup-{timestamp}"
 
     subprocess.run(
@@ -193,7 +193,9 @@ def _build_commit_callback(
         "HASH_MAP = {\n"
         f"{mapping_block}\n"
         "}\n"
-        "orig_hex = commit.original_id.decode('ascii') if isinstance(commit.original_id, bytes) else str(commit.original_id)\n"
+        "orig_hex = commit.original_id.decode('ascii') "
+        "if isinstance(commit.original_id, bytes) "
+        "else str(commit.original_id)\n"
         "if orig_hex in HASH_MAP:\n"
         "    commit.message = HASH_MAP[orig_hex].encode('utf-8') + b'\\n'\n"
     )
@@ -239,7 +241,7 @@ def restore_remotes(repo_path: str, remotes: dict[str, str]) -> None:
         )
     if remotes:
         _console.print(
-            f"[green]Restored remote(s):[/green] "
+            "[green]Restored remote(s):[/green] "
             + ", ".join(f"{n} ({u})" for n, u in remotes.items())
         )
 

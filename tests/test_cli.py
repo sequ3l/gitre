@@ -7,7 +7,7 @@ touch real repositories or the Claude SDK.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -33,7 +33,7 @@ def fake_commit() -> CommitInfo:
         hash="aaa1111111111111111111111111111111111111",
         short_hash="aaa1111",
         author="CLI Tester <cli@test.com>",
-        date=datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc),
+        date=datetime(2026, 3, 1, 12, 0, 0, tzinfo=UTC),
         original_message="wip",
         diff_stat="1 file changed",
         diff_patch="diff --git a/f.py b/f.py",
@@ -516,7 +516,7 @@ class TestCommitCommand:
         """commit delegates to _run_commit_flow with all messages (no filter)."""
         mock_load.return_value = fake_result
 
-        result = runner.invoke(app, ["commit", "/fake/repo"])
+        runner.invoke(app, ["commit", "/fake/repo"])
 
         mock_flow.assert_called_once()
         # Without --only/--skip, all messages should be passed as filtered_messages
@@ -580,7 +580,7 @@ class TestCommitCommand:
         """--only filters to specified short hashes and passes filtered messages."""
         mock_load.return_value = fake_result
 
-        result = runner.invoke(app, ["commit", "/fake/repo", "--only", "aaa1111"])
+        runner.invoke(app, ["commit", "/fake/repo", "--only", "aaa1111"])
 
         # Should succeed (aaa1111 matches our fake_message)
         mock_flow.assert_called_once()
@@ -662,7 +662,7 @@ class TestCommitCommand:
         )
         mock_load.return_value = multi_result
 
-        result = runner.invoke(app, ["commit", "/fake/repo", "--skip", "ccc3333"])
+        runner.invoke(app, ["commit", "/fake/repo", "--skip", "ccc3333"])
 
         mock_flow.assert_called_once()
         call_kwargs = mock_flow.call_args[1]
@@ -685,7 +685,7 @@ class TestCommitCommand:
         """commit defaults repo_path to '.' when not specified."""
         mock_load.return_value = fake_result
 
-        result = runner.invoke(app, ["commit"])
+        runner.invoke(app, ["commit"])
 
         mock_validate.assert_called_once_with(".")
 
@@ -1222,3 +1222,200 @@ class TestCLIOptions:
         assert result.exit_code == 0
         for opt in ("--only", "--skip", "--changelog", "--yes", "--push"):
             assert opt in result.output, f"Missing option {opt} in commit help"
+
+    def test_label_help(self) -> None:
+        """'gitre label --help' shows all label options."""
+        result = runner.invoke(app, ["label", "--help"])
+        assert result.exit_code == 0
+        for opt in ("--all", "--yes", "--push", "--model"):
+            assert opt in result.output, f"Missing option {opt} in label help"
+
+
+# ---------------------------------------------------------------------------
+# label command tests
+# ---------------------------------------------------------------------------
+
+
+class TestLabelCommand:
+    """Tests for the ``gitre label`` command."""
+
+    @patch("gitre.cli._validate_git_repo")
+    @patch("gitre.cli.subprocess.run")
+    def test_no_staged_changes_exits_cleanly(
+        self,
+        mock_run: MagicMock,
+        mock_validate: MagicMock,
+    ) -> None:
+        """label exits with 0 when nothing is staged."""
+        # git diff --cached --quiet returns 0 => nothing staged
+        mock_run.return_value = MagicMock(returncode=0)
+
+        result = runner.invoke(app, ["label", "/fake/repo"])
+        assert result.exit_code == 0
+        assert "No staged changes" in result.output
+
+    @patch("gitre.cli._validate_git_repo")
+    @patch("gitre.cli.subprocess.run")
+    @patch("gitre.cli.labeler.generate_label")
+    @patch("gitre.cli.typer.confirm", return_value=True)
+    def test_label_commits_with_generated_message(
+        self,
+        mock_confirm: MagicMock,
+        mock_gen: MagicMock,
+        mock_run: MagicMock,
+        mock_validate: MagicMock,
+    ) -> None:
+        """label generates a message and commits."""
+
+        fake_msg = GeneratedMessage(
+            hash="staged",
+            short_hash="staged",
+            subject="Add new feature",
+            body=None,
+            changelog_category="Added",
+            changelog_entry="Add new feature.",
+        )
+
+        # First call: git diff --cached --quiet returns 1 (has staged changes)
+        # Second call: git commit -m ... returns success
+        mock_run.side_effect = [
+            MagicMock(returncode=1),  # diff --cached --quiet
+            MagicMock(returncode=0),  # git commit
+        ]
+
+        # generate_label is async, need a coroutine
+        async def _fake_gen(*args: object, **kwargs: object) -> GeneratedMessage:
+            return fake_msg
+
+        mock_gen.side_effect = _fake_gen
+
+        result = runner.invoke(app, ["label", "/fake/repo"])
+        assert result.exit_code == 0
+        assert "Committed" in result.output
+
+    @patch("gitre.cli._validate_git_repo")
+    @patch("gitre.cli.subprocess.run")
+    @patch("gitre.cli.labeler.generate_label")
+    @patch("gitre.cli.typer.confirm", return_value=False)
+    def test_label_aborts_on_decline(
+        self,
+        mock_confirm: MagicMock,
+        mock_gen: MagicMock,
+        mock_run: MagicMock,
+        mock_validate: MagicMock,
+    ) -> None:
+        """label aborts when user declines confirmation."""
+
+        fake_msg = GeneratedMessage(
+            hash="staged",
+            short_hash="staged",
+            subject="Add feature",
+            body=None,
+            changelog_category="Added",
+            changelog_entry="Add feature.",
+        )
+
+        mock_run.return_value = MagicMock(returncode=1)  # has staged changes
+
+        async def _fake_gen(*args: object, **kwargs: object) -> GeneratedMessage:
+            return fake_msg
+
+        mock_gen.side_effect = _fake_gen
+
+        result = runner.invoke(app, ["label", "/fake/repo"])
+        assert result.exit_code == 0
+        assert "Aborted" in result.output
+
+    @patch("gitre.cli._validate_git_repo")
+    @patch("gitre.cli.subprocess.run")
+    @patch("gitre.cli.labeler.generate_label")
+    def test_label_yes_skips_confirmation(
+        self,
+        mock_gen: MagicMock,
+        mock_run: MagicMock,
+        mock_validate: MagicMock,
+    ) -> None:
+        """label with -y skips confirmation and commits directly."""
+
+        fake_msg = GeneratedMessage(
+            hash="staged",
+            short_hash="staged",
+            subject="Fix bug",
+            body=None,
+            changelog_category="Fixed",
+            changelog_entry="Fix bug.",
+        )
+
+        mock_run.side_effect = [
+            MagicMock(returncode=1),  # diff --cached --quiet
+            MagicMock(returncode=0),  # git commit
+        ]
+
+        async def _fake_gen(*args: object, **kwargs: object) -> GeneratedMessage:
+            return fake_msg
+
+        mock_gen.side_effect = _fake_gen
+
+        result = runner.invoke(app, ["label", "/fake/repo", "-y"])
+        assert result.exit_code == 0
+        assert "Committed" in result.output
+
+    @patch("gitre.cli._validate_git_repo")
+    @patch("gitre.cli.subprocess.run")
+    @patch("gitre.cli.labeler.generate_label")
+    def test_label_push_calls_git_push(
+        self,
+        mock_gen: MagicMock,
+        mock_run: MagicMock,
+        mock_validate: MagicMock,
+    ) -> None:
+        """label --push runs git push after commit."""
+
+        fake_msg = GeneratedMessage(
+            hash="staged",
+            short_hash="staged",
+            subject="Update docs",
+            body=None,
+            changelog_category="Changed",
+            changelog_entry="Update docs.",
+        )
+
+        mock_run.side_effect = [
+            MagicMock(returncode=1),  # diff --cached --quiet
+            MagicMock(returncode=0),  # git commit
+            MagicMock(returncode=0),  # git push
+        ]
+
+        async def _fake_gen(*args: object, **kwargs: object) -> GeneratedMessage:
+            return fake_msg
+
+        mock_gen.side_effect = _fake_gen
+
+        result = runner.invoke(app, ["label", "/fake/repo", "-y", "--push"])
+        assert result.exit_code == 0
+        assert "Pushed" in result.output
+
+        # Verify git push was called (third subprocess call)
+        push_call = mock_run.call_args_list[2]
+        assert push_call[0][0] == ["git", "push"]
+
+    @patch("gitre.cli._validate_git_repo")
+    @patch("gitre.cli.subprocess.run")
+    def test_label_all_stages_everything(
+        self,
+        mock_run: MagicMock,
+        mock_validate: MagicMock,
+    ) -> None:
+        """label --all runs git add -A before checking staged changes."""
+        # git add -A succeeds, then git diff --cached --quiet returns 0
+        mock_run.side_effect = [
+            MagicMock(returncode=0),  # git add -A
+            MagicMock(returncode=0),  # diff --cached --quiet (nothing staged)
+        ]
+
+        result = runner.invoke(app, ["label", "/fake/repo", "--all"])
+        assert result.exit_code == 0
+
+        # Verify git add -A was called first
+        add_call = mock_run.call_args_list[0]
+        assert add_call[0][0] == ["git", "add", "-A"]

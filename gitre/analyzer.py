@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import re
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from gitre.models import CommitInfo
 
@@ -248,7 +248,7 @@ def _parse_git_date(date_str: str) -> datetime:
             return datetime.strptime(cleaned, "%Y-%m-%dT%H:%M:%S%z")
         except ValueError:
             logger.warning("Could not parse date %r; using UTC now", date_str)
-            return datetime.now(tz=timezone.utc)
+            return datetime.now(tz=UTC)
 
 
 def _get_tags_for_commit(repo_path: str, commit_hash: str) -> list[str]:

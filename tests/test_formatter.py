@@ -20,7 +20,6 @@ from datetime import datetime
 from gitre.formatter import format_both, format_changelog, format_messages
 from gitre.models import CommitInfo, GeneratedMessage
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -288,7 +287,7 @@ class TestFormatChangelogCategories:
             assert f"- {cat} entry" in result
 
     def test_category_order_follows_keep_a_changelog(self) -> None:
-        """Categories appear in standard order: Added, Changed, Deprecated, Removed, Fixed, Security."""
+        """Categories appear in Keep a Changelog order."""
         expected_order = ["Added", "Changed", "Deprecated", "Removed", "Fixed", "Security"]
         msgs = [
             _make_msg(
@@ -314,8 +313,14 @@ class TestFormatChangelogCategories:
 
     def test_multiple_entries_under_same_category(self) -> None:
         msgs = [
-            _make_msg(hash="h1", short_hash="h1", changelog_category="Fixed", changelog_entry="Bug A"),
-            _make_msg(hash="h2", short_hash="h2", changelog_category="Fixed", changelog_entry="Bug B"),
+            _make_msg(
+                hash="h1", short_hash="h1",
+                changelog_category="Fixed", changelog_entry="Bug A",
+            ),
+            _make_msg(
+                hash="h2", short_hash="h2",
+                changelog_category="Fixed", changelog_entry="Bug B",
+            ),
         ]
         result = format_changelog(msgs, {})
         assert result.count("### Fixed") == 1
@@ -622,8 +627,10 @@ class TestFormatEdgeCases:
 
     def test_all_same_category_only_one_heading(self) -> None:
         msgs = [
-            _make_msg(hash=f"h{i}", short_hash=f"h{i}", changelog_category="Added", changelog_entry=f"Feature {i}")
-            for i in range(5)
+            _make_msg(
+                hash=f"h{i}", short_hash=f"h{i}",
+                changelog_category="Added", changelog_entry=f"Feature {i}",
+            ) for i in range(5)
         ]
         result = format_changelog(msgs, {})
         # Only one "### Added" heading
@@ -634,8 +641,10 @@ class TestFormatEdgeCases:
 
     def test_all_same_category_no_other_category_headings(self) -> None:
         msgs = [
-            _make_msg(hash=f"h{i}", short_hash=f"h{i}", changelog_category="Security", changelog_entry=f"Patch {i}")
-            for i in range(3)
+            _make_msg(
+                hash=f"h{i}", short_hash=f"h{i}",
+                changelog_category="Security", changelog_entry=f"Patch {i}",
+            ) for i in range(3)
         ]
         result = format_changelog(msgs, {})
         assert "### Security" in result
@@ -646,8 +655,14 @@ class TestFormatEdgeCases:
     def test_all_same_category_different_versions(self) -> None:
         """All entries are 'Fixed' but span multiple versions."""
         msgs = [
-            _make_msg(hash="h1", short_hash="h1", changelog_category="Fixed", changelog_entry="Fix A"),
-            _make_msg(hash="h2", short_hash="h2", changelog_category="Fixed", changelog_entry="Fix B"),
+            _make_msg(
+                hash="h1", short_hash="h1",
+                changelog_category="Fixed", changelog_entry="Fix A",
+            ),
+            _make_msg(
+                hash="h2", short_hash="h2",
+                changelog_category="Fixed", changelog_entry="Fix B",
+            ),
         ]
         tags = {"h1": "v2.0.0", "h2": "v1.0.0"}
         result = format_changelog(msgs, tags)
@@ -673,21 +688,29 @@ class TestFormatEdgeCases:
     def test_changelog_with_all_categories_and_versions(self) -> None:
         """Comprehensive test: multiple categories across multiple versions."""
         msgs = [
-            _make_msg(hash="h1", short_hash="h1", changelog_category="Added", changelog_entry="New API"),
-            _make_msg(hash="h2", short_hash="h2", changelog_category="Fixed", changelog_entry="Fix crash"),
-            _make_msg(hash="h3", short_hash="h3", changelog_category="Added", changelog_entry="New CLI"),
-            _make_msg(hash="h4", short_hash="h4", changelog_category="Changed", changelog_entry="Update UI"),
+            _make_msg(
+                hash="h1", short_hash="h1",
+                changelog_category="Added", changelog_entry="New API",
+            ),
+            _make_msg(
+                hash="h2", short_hash="h2",
+                changelog_category="Fixed", changelog_entry="Fix crash",
+            ),
+            _make_msg(
+                hash="h3", short_hash="h3",
+                changelog_category="Added", changelog_entry="New CLI",
+            ),
+            _make_msg(
+                hash="h4", short_hash="h4",
+                changelog_category="Changed", changelog_entry="Update UI",
+            ),
         ]
         tags = {"h2": "v2.0.0", "h4": "v1.0.0"}
-        result = format_changelog(msgs, tags, repo_url="https://github.com/test/proj")
-        # Unreleased has h1 (Added)
+        result = format_changelog(
+            msgs, tags, repo_url="https://github.com/test/proj",
+        )
         assert "## [Unreleased]" in result
-        # v2.0.0 has h2 (Fixed)
         assert "## [v2.0.0]" in result
-        # v1.0.0 has h3 (Added) and h4 (Changed) — based on grouping logic:
-        # h3 is untagged so also goes to nearest section...
-        # Actually h3 is untagged, so it goes to Unreleased
-        # Let me verify: h1 untagged -> Unreleased, h2 tagged v2, h3 untagged -> but comes after h2...
         # _group_messages_by_version walks messages in order:
         #   h1 -> not in tags -> Unreleased
         #   h2 -> tags[h2]=v2.0.0 -> v2.0.0

@@ -109,6 +109,17 @@ Applies cached proposals from a previous `gitre analyze`. Does **not** re-call C
 | `--yes` / `-y` | Skip confirmation prompt |
 | `--push` | Force-push to remote after rewriting history |
 
+#### `gitre label [repo_path]`
+
+Generate a commit message for staged changes and commit. The day-to-day workflow tool — no history rewriting involved.
+
+| Option | Description |
+|---|---|
+| `--all` / `-a` | Stage all changes before generating |
+| `--yes` / `-y` | Skip confirmation prompt |
+| `--push` | Push to remote after committing |
+| `--model` | Claude model (default: `opus`) |
+
 ### More Examples
 
 ```bash
@@ -149,10 +160,11 @@ Before any history rewrite, gitre:
 
 ```
 gitre/
-    cli.py          # Typer CLI (analyze + commit commands)
+    cli.py          # Typer CLI (analyze, commit, label commands)
     analyzer.py     # Git history walking, diff extraction
     generator.py    # Claude Agent SDK integration
     models.py       # Pydantic models (CommitInfo, GeneratedMessage, AnalysisResult)
+    labeler.py      # Staged-diff analysis for label command
     formatter.py    # Keep a Changelog output formatting
     rewriter.py     # git-filter-repo history rewriting
     cache.py        # .gitre/ cache management

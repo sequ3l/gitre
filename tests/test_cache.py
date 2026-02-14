@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -24,7 +24,6 @@ import pytest
 
 from gitre.cache import clear_cache, load_analysis, save_analysis, validate_cache
 from gitre.models import AnalysisResult, GeneratedMessage
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -248,7 +247,7 @@ class TestLoadAnalysis:
             commits_analyzed=2,
             messages=messages,
             tags={"aaa111": "v1.0.0", "bbb222": "v0.9.0"},
-            analyzed_at=datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+            analyzed_at=datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC),
         )
         save_analysis(str(tmp_path), result)
         loaded = load_analysis(str(tmp_path))

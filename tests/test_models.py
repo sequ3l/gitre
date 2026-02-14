@@ -11,7 +11,7 @@ Covers:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -29,7 +29,7 @@ _VALID_COMMIT_DATA: dict = {
     "hash": "a" * 40,
     "short_hash": "a" * 7,
     "author": "Alice <alice@example.com>",
-    "date": datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+    "date": datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC),
     "original_message": "initial commit",
     "diff_stat": " file.py | 1 +\n 1 file changed, 1 insertion(+)",
     "diff_patch": "diff --git a/file.py b/file.py\n+hello\n",
@@ -184,7 +184,7 @@ class TestAnalysisResultRoundTrip:
     """AnalysisResult round-trips through model_dump / model_validate."""
 
     def test_round_trip_with_datetime(self) -> None:
-        analyzed_at = datetime(2026, 6, 15, 8, 30, 0, tzinfo=timezone.utc)
+        analyzed_at = datetime(2026, 6, 15, 8, 30, 0, tzinfo=UTC)
         ar = AnalysisResult(
             **_VALID_ANALYSIS_DATA,
             analyzed_at=analyzed_at,
@@ -213,7 +213,7 @@ class TestAnalysisResultRoundTrip:
             tags={"abc": "v1.0.0"},
             total_tokens=1000,
             total_cost=0.03,
-            analyzed_at=datetime(2026, 2, 14, 12, 0, 0, tzinfo=timezone.utc),
+            analyzed_at=datetime(2026, 2, 14, 12, 0, 0, tzinfo=UTC),
         )
         json_str = ar.model_dump_json()
         restored = AnalysisResult.model_validate_json(json_str)
