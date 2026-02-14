@@ -21,7 +21,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from gitre import analyzer, cache, formatter, generator, rewriter
-from gitre.models import AnalysisResult, GeneratedMessage
+from gitre.models import AnalysisResult, CommitInfo, GeneratedMessage
 
 app = typer.Typer(
     name="gitre",
@@ -29,7 +29,11 @@ app = typer.Typer(
     add_completion=False,
 )
 
-_console = Console(file=open(sys.stdout.fileno(), "w", encoding="utf-8", closefd=False))
+# Ensure UTF-8 console output on Windows (prevents cp1252 encoding errors)
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+_console = Console()
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +93,7 @@ def _get_head_hash(repo_path: str) -> str:
     return result.stdout.strip()
 
 
-def _build_tags_dict(commits: list) -> dict[str, str]:
+def _build_tags_dict(commits: list[CommitInfo]) -> dict[str, str]:
     """Build a ``{hash: tag}`` dict from commits that carry version tags."""
     tags: dict[str, str] = {}
     for c in commits:
@@ -339,7 +343,7 @@ def commit(
 
 
 def _run_generation(
-    enriched: list,
+    enriched: list[CommitInfo],
     repo_path: str,
     model: str,
     batch_size: int,
@@ -400,7 +404,7 @@ def _run_generation(
 def _format_output(
     output: OutputFormat,
     messages: list[GeneratedMessage],
-    commits: list,
+    commits: list[CommitInfo],
     tags: dict[str, str],
     format_style: str,
 ) -> str:
@@ -416,7 +420,7 @@ def _format_output(
 def _run_commit_flow(
     repo_path: str,
     result: AnalysisResult,
-    commits: list | None,
+    commits: list[CommitInfo] | None,
     *,
     yes: bool,
     changelog_file: str | None,

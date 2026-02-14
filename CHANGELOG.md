@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- MIT LICENSE file for public release.
+- GitHub Actions CI workflow running tests, linting (ruff), and type checking (mypy) across Python 3.11–3.13 on Ubuntu and Windows.
 - Initial release of gitre CLI with `analyze` and `commit` commands for AI-powered git commit message reconstruction, Keep a Changelog output, cache-based two-step workflow, git-filter-repo history rewriting, and a comprehensive test suite.
 - README with prerequisites, Claude Code / Agent SDK integration details, full command reference with option tables, usage examples, safety notes, and project structure overview.
 - CLAUDE.md project instructions with workflow reminders and Claude Agent SDK configuration notes.
@@ -13,6 +15,8 @@ All notable changes to this project will be documented in this file.
 - The `analyze` command now exits with a clear error when `--push` is used without `--live`, preventing unintended push attempts.
 
 ### Changed
+- Replace `open(sys.stdout.fileno())` console pattern with `sys.stdout.reconfigure(encoding="utf-8")` + plain `Console()` for cleaner Windows UTF-8 handling.
+- Complete type hints in CLI internal helpers (`_build_tags_dict`, `_run_generation`, `_format_output`, `_run_commit_flow`) to use `list[CommitInfo]` instead of bare `list`.
 - Progress output (spinners, status messages) is now always shown during analysis instead of requiring `--verbose`. The `--verbose` flag now adds per-commit hash detail for debugging, and batch generation now includes progress spinners that were previously missing.
 - git-filter-repo moved from optional to required dependency — it is now installed automatically with gitre. The unused [rewrite] optional extra (including stale tree-sitter entries) has been removed.
 - Stop auto-gitignoring `.gitre/` directory — analysis cache is now tracked by git so it survives history rewrites and repo restores.

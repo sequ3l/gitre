@@ -15,8 +15,6 @@ import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 
-import sys
-
 import typer
 from rich.console import Console
 from rich.panel import Panel
@@ -27,7 +25,7 @@ from gitre.models import CommitInfo, GeneratedMessage
 # ---------------------------------------------------------------------------
 # Module-level console instance used by display helpers
 # ---------------------------------------------------------------------------
-_console = Console(file=open(sys.stdout.fileno(), "w", encoding="utf-8", closefd=False))
+_console = Console()
 
 
 # ---------------------------------------------------------------------------
