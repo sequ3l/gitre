@@ -28,3 +28,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - README with prerequisites, Claude Code / Agent SDK integration details, full command reference, and usage examples
 - CLAUDE.md project instructions with workflow reminders and Claude Agent SDK configuration notes
 - COMMANDS.md with full CLI reference, options, and workflow examples
+
+### Changed
+
+- Progress output (spinners, status messages) now always shown during analysis, not only with `--verbose`
+- `--verbose` / `-v` now adds per-commit hash detail instead of being required for any feedback

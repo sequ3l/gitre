@@ -160,8 +160,7 @@ def analyze(
     _validate_git_repo(repo_path)
 
     # --- 2. Get commits ---
-    if verbose:
-        _console.print(f"[cyan]Fetching commits from[/cyan] {repo_path} …")
+    _console.print(f"[cyan]Fetching commits from[/cyan] {repo_path} …")
 
     try:
         commits = analyzer.get_commits(repo_path, from_ref=from_ref, to_ref=to_ref)
@@ -173,28 +172,22 @@ def analyze(
         typer.echo("No commits found in the specified range.")
         raise typer.Exit(0)
 
-    if verbose:
-        _console.print(f"[cyan]Found {len(commits)} commit(s).[/cyan]")
+    _console.print(f"[cyan]Found {len(commits)} commit(s).[/cyan]")
 
     # --- 3. Enrich each commit ---
     enriched = []
-    if verbose:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=_console,
-        ) as progress:
-            task = progress.add_task("Enriching commits…", total=len(commits))
-            for c in commits:
-                enriched.append(analyzer.enrich_commit(repo_path, c))
-                progress.advance(task)
-    else:
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=_console,
+    ) as progress:
+        task = progress.add_task("Enriching commits…", total=len(commits))
         for c in commits:
             enriched.append(analyzer.enrich_commit(repo_path, c))
+            progress.advance(task)
 
     # --- 4. Generate messages ---
-    if verbose:
-        _console.print("[cyan]Generating messages via Claude…[/cyan]")
+    _console.print("[cyan]Generating messages via Claude…[/cyan]")
 
     try:
         messages = _run_generation(enriched, repo_path, model, batch_size, verbose)
@@ -218,8 +211,7 @@ def analyze(
 
     # --- 6. Save to cache ---
     cache.save_analysis(repo_path, result)
-    if verbose:
-        _console.print("[green]Analysis saved to cache.[/green]")
+    _console.print("[green]Analysis saved to cache.[/green]")
 
     # --- 7. Format output ---
     formatted = _format_output(output, messages, enriched, tags, format)
@@ -232,8 +224,7 @@ def analyze(
         out_path = Path(out_file)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(formatted, encoding="utf-8")
-        if verbose:
-            _console.print(f"[green]Output written to {out_file}[/green]")
+        _console.print(f"[green]Output written to {out_file}[/green]")
 
     # --- 10. If --live, also run commit flow ---
     if live:
@@ -338,46 +329,50 @@ def _run_generation(
     messages: list[GeneratedMessage] = []
 
     if batch_size <= 1:
-        # Individual generation
-        async def _generate_singles() -> list[GeneratedMessage]:
-            results: list[GeneratedMessage] = []
-            for c in enriched:
-                msg = await generator.generate_message(c, cwd=repo_path, model=model)
-                results.append(msg)
-            return results
+        # Individual generation — always show progress
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=_console,
+        ) as progress:
+            task = progress.add_task("Generating…", total=len(enriched))
 
-        if verbose:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=_console,
-            ) as progress:
-                task = progress.add_task("Generating…", total=len(enriched))
+            async def _generate_singles() -> list[GeneratedMessage]:
+                results: list[GeneratedMessage] = []
+                for c in enriched:
+                    if verbose:
+                        _console.print(f"  [dim]{c.short_hash}[/dim] {c.original_message[:50]}")
+                    msg = await generator.generate_message(c, cwd=repo_path, model=model)
+                    results.append(msg)
+                    progress.advance(task)
+                return results
 
-                async def _generate_singles_progress() -> list[GeneratedMessage]:
-                    results: list[GeneratedMessage] = []
-                    for c in enriched:
-                        msg = await generator.generate_message(c, cwd=repo_path, model=model)
-                        results.append(msg)
-                        progress.advance(task)
-                    return results
-
-                messages = asyncio.run(_generate_singles_progress())
-        else:
             messages = asyncio.run(_generate_singles())
     else:
         # Batch generation
-        async def _generate_batch() -> list[GeneratedMessage]:
-            all_messages: list[GeneratedMessage] = []
-            for i in range(0, len(enriched), batch_size):
-                batch = enriched[i : i + batch_size]
-                batch_result = await generator.generate_messages_batch(
-                    batch, cwd=repo_path, model=model
-                )
-                all_messages.extend(batch_result.messages)
-            return all_messages
+        total_batches = (len(enriched) + batch_size - 1) // batch_size
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=_console,
+        ) as progress:
+            task = progress.add_task("Generating batches…", total=total_batches)
 
-        messages = asyncio.run(_generate_batch())
+            async def _generate_batch() -> list[GeneratedMessage]:
+                all_messages: list[GeneratedMessage] = []
+                for i in range(0, len(enriched), batch_size):
+                    batch = enriched[i : i + batch_size]
+                    if verbose:
+                        hashes = ", ".join(c.short_hash for c in batch)
+                        _console.print(f"  [dim]Batch: {hashes}[/dim]")
+                    batch_result = await generator.generate_messages_batch(
+                        batch, cwd=repo_path, model=model
+                    )
+                    all_messages.extend(batch_result.messages)
+                    progress.advance(task)
+                return all_messages
+
+            messages = asyncio.run(_generate_batch())
 
     return messages
 
