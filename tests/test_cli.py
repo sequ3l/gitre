@@ -7,6 +7,7 @@ touch real repositories or the Claude SDK.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -19,6 +20,13 @@ from gitre.cli import OutputFormat, _build_tags_dict, _validate_git_repo, app
 from gitre.models import AnalysisResult, CommitInfo, GeneratedMessage
 
 runner = CliRunner()
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes so assertions work with Rich-coloured output."""
+    return _ANSI_RE.sub("", text)
 
 
 # ---------------------------------------------------------------------------
@@ -1200,35 +1208,39 @@ class TestCLIOptions:
         """'gitre --help' shows proper usage with both commands listed."""
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
-        assert "analyze" in result.output
-        assert "commit" in result.output
+        plain = _strip_ansi(result.output)
+        assert "analyze" in plain
+        assert "commit" in plain
         # Should mention the app's purpose
-        assert "git" in result.output.lower() or "AI" in result.output
+        assert "git" in plain.lower() or "AI" in plain
 
     def test_analyze_help(self) -> None:
         """'gitre analyze --help' shows all analyze options."""
         result = runner.invoke(app, ["analyze", "--help"])
         assert result.exit_code == 0
+        plain = _strip_ansi(result.output)
         # All documented options must appear
         for opt in ("--output", "--format", "--from", "--to", "--live",
                      "--out-file", "--model", "--batch-size", "--verbose", "--push"):
-            assert opt in result.output, f"Missing option {opt} in analyze help"
+            assert opt in plain, f"Missing option {opt} in analyze help"
         # The positional argument hint
-        assert "repo" in result.output.lower()
+        assert "repo" in plain.lower()
 
     def test_commit_help(self) -> None:
         """'gitre commit --help' shows all commit options."""
         result = runner.invoke(app, ["commit", "--help"])
         assert result.exit_code == 0
+        plain = _strip_ansi(result.output)
         for opt in ("--only", "--skip", "--changelog", "--yes", "--push"):
-            assert opt in result.output, f"Missing option {opt} in commit help"
+            assert opt in plain, f"Missing option {opt} in commit help"
 
     def test_label_help(self) -> None:
         """'gitre label --help' shows all label options."""
         result = runner.invoke(app, ["label", "--help"])
         assert result.exit_code == 0
+        plain = _strip_ansi(result.output)
         for opt in ("--all", "--yes", "--push", "--model"):
-            assert opt in result.output, f"Missing option {opt} in label help"
+            assert opt in plain, f"Missing option {opt} in label help"
 
 
 # ---------------------------------------------------------------------------
