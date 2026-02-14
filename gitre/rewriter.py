@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import platform
 import subprocess
+import tempfile
 import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
@@ -271,19 +272,35 @@ def rewrite_history(
     callback_script = _build_content_callback_with_originals(pairs)
 
     # --- 5. Execute rewrite ---
-    subprocess.run(
-        [
-            "git",
-            "filter-repo",
-            "--force",
-            "--message-callback",
-            callback_script,
-        ],
-        cwd=repo_path,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    # Write callback to a temp file to avoid Windows command-line length
+    # limits (8,191 chars for cmd.exe / ~32K for CreateProcess).  With
+    # many commits the inline callback easily exceeds these limits.
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".py",
+        prefix="gitre_callback_",
+        delete=False,
+        encoding="utf-8",
+    ) as tmp:
+        tmp.write(callback_script)
+        callback_file = tmp.name
+
+    try:
+        subprocess.run(
+            [
+                "git",
+                "filter-repo",
+                "--force",
+                "--message-callback",
+                callback_file,
+            ],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    finally:
+        Path(callback_file).unlink(missing_ok=True)
 
     _console.print("[green]History rewrite complete.[/green]")
 

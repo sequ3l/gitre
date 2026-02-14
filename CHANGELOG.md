@@ -34,3 +34,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Progress output (spinners, status messages) now always shown during analysis, not only with `--verbose`
 - `--verbose` / `-v` now adds per-commit hash detail instead of being required for any feedback
 - `git-filter-repo` moved from optional to required dependency — installed automatically with gitre
+
+### Fixed
+
+- Write filter-repo callback to temp file instead of passing inline — fixes Windows command-line length limit (WinError 206) on repos with many commits
