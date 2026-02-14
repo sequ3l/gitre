@@ -1,0 +1,407 @@
+"""Git history rewriting using git-filter-repo.
+
+Provides functions to rewrite commit messages in a git repository using
+git-filter-repo's --message-callback mechanism. Includes backup creation,
+user confirmation, changelog generation, and rich console display of proposals.
+"""
+
+from __future__ import annotations
+
+import platform
+import subprocess
+import textwrap
+from datetime import datetime, timezone
+from pathlib import Path
+
+import typer
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+
+from gitre.models import CommitInfo, GeneratedMessage
+
+# ---------------------------------------------------------------------------
+# Module-level console instance used by display helpers
+# ---------------------------------------------------------------------------
+_console = Console()
+
+
+# ---------------------------------------------------------------------------
+# 1. check_filter_repo
+# ---------------------------------------------------------------------------
+def check_filter_repo() -> bool:
+    """Check whether ``git-filter-repo`` is available on the system PATH.
+
+    Returns ``True`` if the tool can be invoked, ``False`` otherwise.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "filter-repo", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False
+
+
+# ---------------------------------------------------------------------------
+# 2. get_install_instructions
+# ---------------------------------------------------------------------------
+def get_install_instructions() -> str:
+    """Return platform-appropriate install instructions for *git-filter-repo*.
+
+    Detects the current OS via :mod:`platform` and provides the most common
+    installation method for that platform.
+    """
+    system = platform.system().lower()
+
+    if system == "darwin":
+        return textwrap.dedent("""\
+            Install git-filter-repo on macOS:
+              brew install git-filter-repo
+            Or via pip:
+              pip install git-filter-repo""")
+    elif system == "linux":
+        return textwrap.dedent("""\
+            Install git-filter-repo on Linux:
+              # Debian / Ubuntu
+              sudo apt-get install git-filter-repo
+              # Fedora
+              sudo dnf install git-filter-repo
+              # Arch
+              sudo pacman -S git-filter-repo
+            Or via pip:
+              pip install git-filter-repo""")
+    else:
+        # Windows or other
+        return textwrap.dedent("""\
+            Install git-filter-repo on Windows:
+              pip install git-filter-repo
+            Or via scoop:
+              scoop install git-filter-repo""")
+
+
+# ---------------------------------------------------------------------------
+# 3. create_backup
+# ---------------------------------------------------------------------------
+def create_backup(repo_path: str) -> str:
+    """Create a backup branch named ``gitre-backup-{timestamp}``.
+
+    Parameters
+    ----------
+    repo_path:
+        Path to the root of the git repository.
+
+    Returns
+    -------
+    str
+        The name of the newly created backup branch.
+
+    Raises
+    ------
+    subprocess.CalledProcessError
+        If the ``git branch`` command fails.
+    """
+    timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    branch_name = f"gitre-backup-{timestamp}"
+
+    subprocess.run(
+        ["git", "branch", branch_name],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return branch_name
+
+
+# ---------------------------------------------------------------------------
+# 4. build_message_callback
+# ---------------------------------------------------------------------------
+def build_message_callback(messages: list[GeneratedMessage]) -> str:
+    """Generate a Python callback script for ``--message-callback``.
+
+    The callback maps original commit messages to new messages by matching
+    on the original message content (since commit hashes change during
+    rewrite).  The *messages* list must carry the ``hash`` field so that
+    we can look up the original commit message for each entry, but the
+    actual matching in the callback is done by message content, not hash.
+
+    .. note::
+
+        When called directly (without original messages resolved), this
+        returns an identity callback (``return message``).  The
+        :func:`rewrite_history` function resolves original messages from
+        git and calls :func:`_build_content_callback_with_originals`
+        to produce the real mapping callback.
+
+    Parameters
+    ----------
+    messages:
+        List of :class:`GeneratedMessage` objects that define the
+        subject (and optional body) for each commit to be rewritten.
+
+    Returns
+    -------
+    str
+        A Python expression/script suitable for passing to
+        ``git filter-repo --message-callback``.
+    """
+    # Without knowing the original commit messages we cannot build the
+    # content-based lookup map.  The full pipeline (rewrite_history)
+    # resolves originals from git and uses _build_content_callback_with_originals.
+    # As a standalone call, return a safe identity callback.
+    return "return message"
+
+
+def _build_content_callback_with_originals(
+    pairs: list[tuple[str, str]],
+) -> str:
+    """Build the actual content-matching callback.
+
+    Parameters
+    ----------
+    pairs:
+        List of ``(original_message, new_message)`` tuples.
+
+    Returns
+    -------
+    str
+        Python code for ``--message-callback``.
+    """
+    mapping_entries: list[str] = []
+    for original, new in pairs:
+        # Escape for safe embedding in a Python dict literal
+        orig_repr = repr(original.strip())
+        new_repr = repr(new.strip())
+        mapping_entries.append(f"  {orig_repr}: {new_repr},")
+
+    mapping_block = "\n".join(mapping_entries)
+
+    # The callback script.  git-filter-repo passes `message` as bytes.
+    callback = (
+        "CONTENT_MAP = {\n"
+        f"{mapping_block}\n"
+        "}\n"
+        "decoded = message.decode('utf-8', errors='replace').strip()\n"
+        "if decoded in CONTENT_MAP:\n"
+        "    return CONTENT_MAP[decoded].encode('utf-8') + b'\\n'\n"
+        "return message"
+    )
+    return callback
+
+
+# ---------------------------------------------------------------------------
+# 5. rewrite_history
+# ---------------------------------------------------------------------------
+def rewrite_history(
+    repo_path: str,
+    messages: list[GeneratedMessage],
+) -> dict[str, str]:
+    """Rewrite git history using ``git filter-repo --message-callback``.
+
+    Steps performed:
+
+    1. Verify that ``git-filter-repo`` is installed.
+    2. Create a backup branch via :func:`create_backup`.
+    3. Resolve original commit messages for each hash.
+    4. Build a content-matching callback.
+    5. Execute ``git filter-repo --force --message-callback <script>``.
+    6. Return a mapping of ``{short_hash: "before -> after"}`` entries.
+
+    Parameters
+    ----------
+    repo_path:
+        Path to the root of the git repository.
+    messages:
+        :class:`GeneratedMessage` instances to apply.
+
+    Returns
+    -------
+    dict[str, str]
+        Mapping of short hashes to human-readable before/after descriptions.
+
+    Raises
+    ------
+    RuntimeError
+        If ``git-filter-repo`` is not installed.
+    subprocess.CalledProcessError
+        If any git command fails.
+    """
+    # --- 1. Availability check ---
+    if not check_filter_repo():
+        instructions = get_install_instructions()
+        raise RuntimeError(
+            f"git-filter-repo is not installed.\n{instructions}"
+        )
+
+    # --- 2. Backup ---
+    backup_branch = create_backup(repo_path)
+    _console.print(
+        f"[green]Backup branch created:[/green] {backup_branch}"
+    )
+
+    # --- 3. Resolve original messages ---
+    pairs: list[tuple[str, str]] = []
+    results: dict[str, str] = {}
+
+    for msg in messages:
+        # Retrieve the original commit message by its hash
+        proc = subprocess.run(
+            ["git", "log", "-1", "--format=%B", msg.hash],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        original_message = proc.stdout.strip()
+
+        # Compose new message
+        if msg.body:
+            new_message = f"{msg.subject}\n\n{msg.body}"
+        else:
+            new_message = msg.subject
+
+        pairs.append((original_message, new_message))
+        results[msg.short_hash] = f"{original_message!r} -> {new_message!r}"
+
+    # --- 4. Build callback ---
+    callback_script = _build_content_callback_with_originals(pairs)
+
+    # --- 5. Execute rewrite ---
+    subprocess.run(
+        [
+            "git",
+            "filter-repo",
+            "--force",
+            "--message-callback",
+            callback_script,
+        ],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    _console.print("[green]History rewrite complete.[/green]")
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# 6. write_changelog
+# ---------------------------------------------------------------------------
+def write_changelog(
+    repo_path: str,
+    changelog_content: str,
+    file_path: str,
+) -> None:
+    """Write changelog content to a file inside the repository.
+
+    Parameters
+    ----------
+    repo_path:
+        Path to the root of the git repository.
+    changelog_content:
+        The rendered changelog text.
+    file_path:
+        Relative (to *repo_path*) or absolute path for the output file.
+    """
+    target = Path(file_path)
+    if not target.is_absolute():
+        target = Path(repo_path) / target
+
+    # Ensure parent directories exist
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(changelog_content, encoding="utf-8")
+
+    _console.print(f"[green]Changelog written to:[/green] {target}")
+
+
+# ---------------------------------------------------------------------------
+# 7. display_proposals
+# ---------------------------------------------------------------------------
+def display_proposals(
+    messages: list[GeneratedMessage],
+    commits: list[CommitInfo] | None = None,
+) -> None:
+    """Print proposed commit message rewrites to the console.
+
+    Uses :pypi:`rich` tables for clear, formatted output.
+
+    Parameters
+    ----------
+    messages:
+        The generated replacement messages.
+    commits:
+        Optional list of :class:`CommitInfo` objects.  When supplied the
+        original messages are pulled from these objects for a side-by-side
+        comparison.  Otherwise only the proposed new messages are shown.
+    """
+    if not messages:
+        _console.print("[yellow]No proposals to display.[/yellow]")
+        return
+
+    # Build a lookup for original messages if commits are provided
+    originals: dict[str, str] = {}
+    if commits:
+        for c in commits:
+            originals[c.hash] = c.original_message
+            originals[c.short_hash] = c.original_message
+
+    table = Table(
+        title="Proposed Commit Message Rewrites",
+        show_lines=True,
+        expand=True,
+    )
+    table.add_column("Hash", style="cyan", no_wrap=True, width=10)
+    if commits:
+        table.add_column("Original", style="dim")
+    table.add_column("Proposed Subject", style="green")
+    table.add_column("Body", style="white")
+    table.add_column("Category", style="magenta", no_wrap=True, width=12)
+    table.add_column("Changelog", style="yellow")
+
+    for msg in messages:
+        row: list[str] = [msg.short_hash]
+        if commits:
+            original_text = originals.get(msg.hash, originals.get(msg.short_hash, "—"))
+            row.append(original_text)
+        row.extend([
+            msg.subject,
+            msg.body or "—",
+            msg.changelog_category,
+            msg.changelog_entry,
+        ])
+        table.add_row(*row)
+
+    _console.print()
+    _console.print(table)
+    _console.print()
+
+    # Summary panel
+    categories: dict[str, int] = {}
+    for msg in messages:
+        categories[msg.changelog_category] = categories.get(msg.changelog_category, 0) + 1
+    summary_parts = [f"[bold]{len(messages)}[/bold] commit(s) to rewrite"]
+    for cat, count in sorted(categories.items()):
+        summary_parts.append(f"  {cat}: {count}")
+    _console.print(
+        Panel("\n".join(summary_parts), title="Summary", border_style="blue")
+    )
+
+
+# ---------------------------------------------------------------------------
+# 8. confirm_rewrite
+# ---------------------------------------------------------------------------
+def confirm_rewrite() -> bool:
+    """Prompt the user for confirmation before rewriting history.
+
+    Returns ``True`` if the user confirms, ``False`` otherwise.
+    """
+    return typer.confirm(
+        "This will rewrite git history. Are you sure you want to proceed?",
+        default=False,
+    )
