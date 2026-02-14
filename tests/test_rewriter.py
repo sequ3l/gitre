@@ -358,18 +358,32 @@ class TestRestoreRemotes:
 
     @patch("gitre.rewriter.subprocess.run")
     def test_adds_remotes(self, mock_run: MagicMock) -> None:
-        """Should call git remote add for each remote."""
-        mock_run.return_value = MagicMock(returncode=0)
+        """Should call git remote add for each remote and set upstream."""
+        branch_result = MagicMock(returncode=0)
+        branch_result.stdout = "master\n"
+        mock_run.side_effect = [
+            MagicMock(returncode=0),  # git remote add
+            branch_result,            # git branch --show-current
+            MagicMock(returncode=0),  # git branch --set-upstream-to
+        ]
         restore_remotes("/fake/repo", {"origin": "https://example.com/repo.git"})
-        mock_run.assert_called_once()
-        args = mock_run.call_args[0][0]
-        assert args == ["git", "remote", "add", "origin", "https://example.com/repo.git"]
+        assert mock_run.call_args_list[0][0][0] == [
+            "git", "remote", "add", "origin", "https://example.com/repo.git",
+        ]
+        assert mock_run.call_args_list[2][0][0] == [
+            "git", "branch", "--set-upstream-to", "origin/master",
+        ]
 
     @patch("gitre.rewriter.subprocess.run")
     def test_empty_dict_is_noop(self, mock_run: MagicMock) -> None:
-        """Should not call git when no remotes to restore."""
+        """Should not call git remote add when no remotes to restore."""
+        branch_result = MagicMock(returncode=0)
+        branch_result.stdout = "master\n"
+        mock_run.return_value = branch_result
         restore_remotes("/fake/repo", {})
-        mock_run.assert_not_called()
+        for call in mock_run.call_args_list:
+            args = call[0][0]
+            assert args[0:3] != ["git", "remote", "add"]
 
 
 # ===========================================================================

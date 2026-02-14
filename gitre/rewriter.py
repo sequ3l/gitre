@@ -245,6 +245,23 @@ def restore_remotes(repo_path: str, remotes: dict[str, str]) -> None:
             + ", ".join(f"{n} ({u})" for n, u in remotes.items())
         )
 
+    # Restore upstream tracking for the current branch.
+    # git-filter-repo strips this along with remotes, which causes
+    # tools like VS Code to show "Publish Branch" instead of push/pull.
+    branch = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if branch and "origin" in remotes:
+        subprocess.run(
+            ["git", "branch", "--set-upstream-to", f"origin/{branch}"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+        )
+
 
 # ---------------------------------------------------------------------------
 # 6. rewrite_history
