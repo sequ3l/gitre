@@ -38,3 +38,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - Write filter-repo callback to temp file instead of passing inline — fixes Windows command-line length limit (WinError 206) on repos with many commits
+- Switch from `--message-callback` to `--commit-callback` with hash-based matching — fixes all commits getting the same message when many share identical original messages (e.g. "etc")

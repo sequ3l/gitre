@@ -157,39 +157,44 @@ def build_message_callback(messages: list[GeneratedMessage]) -> str:
     return "return message"
 
 
-def _build_content_callback_with_originals(
-    pairs: list[tuple[str, str]],
+def _build_commit_callback(
+    hash_map: dict[str, str],
 ) -> str:
-    """Build the actual content-matching callback.
+    """Build a ``--commit-callback`` script that matches by original hash.
+
+    Unlike ``--message-callback`` (which only receives the message text),
+    ``--commit-callback`` receives the full commit object including
+    ``commit.original_id`` — the hex hash from before the rewrite.  This
+    avoids the duplicate-key problem when many commits share the same
+    original message (e.g. "etc").
 
     Parameters
     ----------
-    pairs:
-        List of ``(original_message, new_message)`` tuples.
+    hash_map:
+        Mapping of ``{original_full_hash: new_message}``.
 
     Returns
     -------
     str
-        Python code for ``--message-callback``.
+        Python code for ``--commit-callback``.
     """
     mapping_entries: list[str] = []
-    for original, new in pairs:
-        # Escape for safe embedding in a Python dict literal
-        orig_repr = repr(original.strip())
-        new_repr = repr(new.strip())
-        mapping_entries.append(f"  {orig_repr}: {new_repr},")
+    for old_hash, new_msg in hash_map.items():
+        hash_repr = repr(old_hash)
+        msg_repr = repr(new_msg)
+        mapping_entries.append(f"  {hash_repr}: {msg_repr},")
 
     mapping_block = "\n".join(mapping_entries)
 
-    # The callback script.  git-filter-repo passes `message` as bytes.
+    # commit.original_id is a bytes hex hash; decode to str for lookup.
+    # commit.message is bytes; we replace it with encoded new message.
     callback = (
-        "CONTENT_MAP = {\n"
+        "HASH_MAP = {\n"
         f"{mapping_block}\n"
         "}\n"
-        "decoded = message.decode('utf-8', errors='replace').strip()\n"
-        "if decoded in CONTENT_MAP:\n"
-        "    return CONTENT_MAP[decoded].encode('utf-8') + b'\\n'\n"
-        "return message"
+        "orig_hex = commit.original_id.decode('ascii') if isinstance(commit.original_id, bytes) else str(commit.original_id)\n"
+        "if orig_hex in HASH_MAP:\n"
+        "    commit.message = HASH_MAP[orig_hex].encode('utf-8') + b'\\n'\n"
     )
     return callback
 
@@ -201,15 +206,20 @@ def rewrite_history(
     repo_path: str,
     messages: list[GeneratedMessage],
 ) -> dict[str, str]:
-    """Rewrite git history using ``git filter-repo --message-callback``.
+    """Rewrite git history using ``git filter-repo --commit-callback``.
+
+    Uses ``--commit-callback`` with hash-based matching via
+    ``commit.original_id``.  This avoids the duplicate-key problem that
+    occurs with ``--message-callback`` when many commits share the same
+    original message (e.g. dozens of "etc" commits).
 
     Steps performed:
 
     1. Verify that ``git-filter-repo`` is installed.
     2. Create a backup branch via :func:`create_backup`.
-    3. Resolve original commit messages for each hash.
-    4. Build a content-matching callback.
-    5. Execute ``git filter-repo --force --message-callback <script>``.
+    3. Build a hash → new_message mapping.
+    4. Write callback to a temp file (avoids Windows cmd length limits).
+    5. Execute ``git filter-repo --force --commit-callback <file>``.
     6. Return a mapping of ``{short_hash: "before -> after"}`` entries.
 
     Parameters
@@ -244,32 +254,22 @@ def rewrite_history(
         f"[green]Backup branch created:[/green] {backup_branch}"
     )
 
-    # --- 3. Resolve original messages ---
-    pairs: list[tuple[str, str]] = []
+    # --- 3. Build hash → new_message mapping ---
+    hash_map: dict[str, str] = {}
     results: dict[str, str] = {}
 
     for msg in messages:
-        # Retrieve the original commit message by its hash
-        proc = subprocess.run(
-            ["git", "log", "-1", "--format=%B", msg.hash],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        original_message = proc.stdout.strip()
-
         # Compose new message
         if msg.body:
             new_message = f"{msg.subject}\n\n{msg.body}"
         else:
             new_message = msg.subject
 
-        pairs.append((original_message, new_message))
-        results[msg.short_hash] = f"{original_message!r} -> {new_message!r}"
+        hash_map[msg.hash] = new_message
+        results[msg.short_hash] = f"{msg.subject}"
 
     # --- 4. Build callback ---
-    callback_script = _build_content_callback_with_originals(pairs)
+    callback_script = _build_commit_callback(hash_map)
 
     # --- 5. Execute rewrite ---
     # Write callback to a temp file to avoid Windows command-line length
@@ -291,7 +291,7 @@ def rewrite_history(
                 "git",
                 "filter-repo",
                 "--force",
-                "--message-callback",
+                "--commit-callback",
                 callback_file,
             ],
             cwd=repo_path,
