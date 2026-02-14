@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import sys
 from enum import Enum
 from pathlib import Path
 
@@ -28,7 +29,7 @@ app = typer.Typer(
     add_completion=False,
 )
 
-_console = Console()
+_console = Console(file=open(sys.stdout.fileno(), "w", encoding="utf-8", closefd=False))
 
 
 # ---------------------------------------------------------------------------
@@ -468,10 +469,7 @@ def _run_commit_flow(
         )
         rewriter.write_changelog(repo_path, changelog_content, changelog_file)
 
-    # 6. Clear cache
-    cache.clear_cache(repo_path)
-
-    # 7. Report results
+    # 6. Report results
     typer.echo(f"\nSuccessfully rewrote {len(results_map)} commit(s).")
     for short_hash, description in results_map.items():
         typer.echo(f"  {short_hash}: {description}")
