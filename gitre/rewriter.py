@@ -418,7 +418,7 @@ def commit_artifacts(repo_path: str, changelog_file: str | None = None) -> None:
         files_to_add.append(str(target))
 
     subprocess.run(
-        ["git", "add", *files_to_add],
+        ["git", "add", "-f", *files_to_add],
         cwd=repo_path,
         capture_output=True,
         text=True,

@@ -54,6 +54,3 @@ desktop.ini
 .env
 .env.local
 .env.*.local
-
-# gitre specific
-.gitre/

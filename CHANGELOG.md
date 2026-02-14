@@ -2,64 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-
 ## [Unreleased]
 
-### Changed
-
-- Rewrite README "How It Works" to explain the full two-phase pipeline (analyze + commit), including backup, remote save/restore, hash-based rewrite, artifact commit, and optional force-push
-- Add Compatibility section to README documenting support for GitHub, GitLab, Azure DevOps, Bitbucket, and any standard Git remote
-- Expand Safety section with remote restore and explicit push-only behaviour
-
-### Fixed
-
-- Correct Python version requirement from 3.10+ to 3.11+ across all docs (matches pyproject.toml)
-- Correct default `--model` from `sonnet` to `opus` in README and COMMANDS.md
-- Document missing `--push` flag in README and COMMANDS.md command tables
-- Correct `--verbose` description to "per-commit hash details" instead of "progress and token usage"
-- Update rewriter.py module docstring from `--message-callback` to `--commit-callback`
-- Update cache.py docstring to remove references to .gitignore creation that no longer occurs
-
-## [0.1.0] - 2026-02-14
-
 ### Added
-
-- `gitre analyze` command — walks git history, extracts diffs, and generates meaningful commit messages and changelog entries via Claude (claude-agent-sdk)
-- `gitre commit` command — applies cached analysis results to rewrite git history without re-calling Claude
-- Keep a Changelog formatted output with version tag grouping and comparison links
-- Two-step workflow: analyze first, review proposals, then commit — or use `--live` for one-shot operation
-- Selective commit application with `--only` and `--skip` filters
-- Commit range support via `--from` and `--to` refs
-- Batch mode (`--batch-size`) for analyzing multiple commits per Claude call
-- Model selection (`--model`) supporting sonnet, opus, and haiku
-- `.gitre/` cache directory for staging analysis results between analyze and commit
-- Cache validation with HEAD hash staleness detection
-- Automatic backup branch creation (`gitre-backup-{timestamp}`) before any history rewrite
-- Automatic remote save/restore around `git-filter-repo` — remotes are no longer stripped after history rewrite
-- Automatic artifact commit after rewrite — `.gitre/` cache and changelog are committed with a clean message
-- `--push` flag on both `analyze --live` and `commit` — force-pushes rewritten history to remote after rewrite
-- Git history rewriting via git-filter-repo integration with content-matching callbacks
-- Large diff truncation (>50KB) with file-level summaries
-- Robust multi-strategy JSON extraction from Claude responses
-- Pydantic v2 models for CommitInfo, GeneratedMessage, and AnalysisResult
-- Rich console output for progress and proposal display
-- Comprehensive test suite with autouse Claude SDK mock fixture to prevent real API calls
-- README with prerequisites, Claude Code / Agent SDK integration details, full command reference, and usage examples
-- CLAUDE.md project instructions with workflow reminders and Claude Agent SDK configuration notes
-- COMMANDS.md with full CLI reference, options, and workflow examples
+- Initial release of gitre, an AI-powered CLI tool that reconstructs meaningful git commit messages and changelogs by analyzing diffs with Claude, featuring a two-step analyze-then-commit workflow, Keep a Changelog formatting, batch analysis, selective commit filtering, and git history rewriting via git-filter-repo.
+- README with prerequisites, Claude Code / Agent SDK integration details, full command reference, and usage examples.
+- CLAUDE.md project instructions with workflow reminders and Claude Agent SDK configuration notes.
+- COMMANDS.md with full CLI reference covering all subcommands, options, and typical workflow examples.
+- Automate the post-rewrite workflow: remotes are now saved and restored around git-filter-repo, artifacts are committed automatically, and a new `--push` flag force-pushes the rewritten branch to the remote.
 
 ### Changed
-
-- Default `--model` changed from `sonnet` to `opus` for higher quality analysis
-- Stop auto-gitignoring `.gitre/` directory — analysis cache is now tracked by git so it survives history rewrites and repo restores
-- Progress output (spinners, status messages) now always shown during analysis, not only with `--verbose`
-- `--verbose` / `-v` now adds per-commit hash detail instead of being required for any feedback
-- `git-filter-repo` moved from optional to required dependency — installed automatically with gitre
+- Progress output (spinners, status messages) is now always shown during analysis, not only with `--verbose`. The `--verbose` flag now adds per-commit hash detail for debugging instead of being required for any feedback.
+- git-filter-repo moved from optional to required dependency — it is now installed automatically with gitre. Removed the unused [rewrite] optional extra along with stale tree-sitter entries.
+- Stop auto-gitignoring the `.gitre/` directory — the analysis cache is now tracked by git so it survives history rewrites and repo restores.
+- Default `--model` changed from `sonnet` to `opus` for higher quality analysis.
+- Rewrite README documentation with detailed two-phase pipeline explanation, add Compatibility section for supported Git remotes, and fix several inaccuracies including Python version requirement, default model, and missing --push flag.
 
 ### Fixed
-
-- Write filter-repo callback to temp file instead of passing inline — fixes Windows command-line length limit (WinError 206) on repos with many commits
-- Switch from `--message-callback` to `--commit-callback` with hash-based matching — fixes all commits getting the same message when many share identical original messages (e.g. "etc")
-- Force UTF-8 encoding on Rich console output — fixes `UnicodeEncodeError` crash on Windows (cp1252) when commit messages contain Unicode characters
-- Stop deleting analysis.json after history rewrite — cache is preserved for safety and re-runs
+- Write filter-repo callback to a temp file instead of passing inline — fixes Windows command-line length limit (WinError 206) on repos with many commits.
+- Switch from `--message-callback` to `--commit-callback` with hash-based matching — fixes all commits getting the same message when many share identical original messages (e.g. "etc").
+- Fix UnicodeEncodeError crash on Windows (cp1252) by forcing UTF-8 on Rich console output, and stop deleting analysis.json after rewrite so the cache is preserved for safety.
+- The `analyze` command now exits with a clear error when `--push` is passed without `--live`, preventing silent misuse of incompatible flags.
+- Fix documentation drift by syncing CLAUDE.md, COMMANDS.md, and module docstrings with the actual codebase, correcting the Python version, default model, dependency status, flag descriptions, and adding the missing --push flag documentation.
