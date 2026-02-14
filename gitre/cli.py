@@ -138,7 +138,7 @@ def analyze(
         help="Write formatted output to this file.",
     ),
     model: str = typer.Option(
-        "sonnet",
+        "opus",
         "--model",
         help="Claude model to use for analysis.",
     ),
