@@ -4,10 +4,10 @@
 gitre reconstructs meaningful git commit messages and changelogs by analyzing diffs with Claude (via claude-agent-sdk).
 
 ## Tech Stack
-- Python 3.10+, asyncio
+- Python 3.11+, asyncio
 - Typer CLI, Pydantic v2
 - claude-agent-sdk for LLM calls
-- git-filter-repo for history rewriting (optional dependency)
+- git-filter-repo for history rewriting (required dependency)
 
 ## Commands
 - Install: `pip install -e ".[dev]"`

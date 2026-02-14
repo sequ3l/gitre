@@ -20,9 +20,10 @@ Analyse git history and generate improved commit messages + changelog.
 | `--to` | | `HEAD` | Inclusive end ref |
 | `--live` | | | After analysis, immediately rewrite history and write changelog |
 | `--out-file` | `-f` | | Write formatted output to this file |
-| `--model` | | `sonnet` | Claude model to use: `sonnet`, `opus`, `haiku` |
+| `--model` | | `opus` | Claude model to use: `sonnet`, `opus`, `haiku` |
 | `--batch-size` | | `1` | Commits to analyse per Claude call (higher = faster, possibly less accurate) |
-| `--verbose` | `-v` | | Show detailed progress information |
+| `--verbose` | `-v` | | Show per-commit hash details during analysis |
+| `--push` | | | Force-push to remote after rewriting (requires `--live`) |
 
 ### Examples
 
@@ -72,6 +73,7 @@ Load cached analysis and rewrite git history with improved messages. Does **not*
 | `--skip` | | | Comma-separated list of short hashes to skip |
 | `--changelog` | `-f` | | Write changelog to this file path after rewriting |
 | `--yes` | `-y` | | Skip confirmation prompt (for scripting / CI) |
+| `--push` | | | Force-push to remote after rewriting history |
 
 ### Examples
 
@@ -90,6 +92,9 @@ gitre commit /path/to/repo --skip abc1234
 
 # Non-interactive (scripted / CI)
 gitre commit /path/to/repo -f CHANGELOG.md -y
+
+# Non-interactive with force-push
+gitre commit /path/to/repo -f CHANGELOG.md -y --push
 ```
 
 ---

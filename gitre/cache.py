@@ -29,10 +29,8 @@ def _analysis_path(repo_path: str) -> Path:
 def save_analysis(repo_path: str, result: AnalysisResult) -> None:
     """Write an AnalysisResult to .gitre/analysis.json.
 
-    Creates the .gitre/ directory if it doesn't exist, writes a
-    .gitre/.gitignore to exclude analysis.json from version control,
-    and auto-adds '.gitre/' to the target repo's root .gitignore if
-    that file exists.
+    Creates the .gitre/ directory if it doesn't exist and writes the
+    analysis result as JSON.
 
     Args:
         repo_path: Path to the target git repository.

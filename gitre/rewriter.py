@@ -1,8 +1,9 @@
 """Git history rewriting using git-filter-repo.
 
 Provides functions to rewrite commit messages in a git repository using
-git-filter-repo's --message-callback mechanism. Includes backup creation,
-user confirmation, changelog generation, and rich console display of proposals.
+git-filter-repo's --commit-callback mechanism with hash-based matching.
+Includes backup creation, remote save/restore, user confirmation, changelog
+generation, and rich console display of proposals.
 """
 
 from __future__ import annotations
