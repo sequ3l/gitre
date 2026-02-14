@@ -27,3 +27,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Comprehensive test suite with autouse Claude SDK mock fixture to prevent real API calls
 - README with prerequisites, Claude Code / Agent SDK integration details, full command reference, and usage examples
 - CLAUDE.md project instructions with workflow reminders and Claude Agent SDK configuration notes
+- COMMANDS.md with full CLI reference, options, and workflow examples
