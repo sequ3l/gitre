@@ -162,6 +162,11 @@ def analyze(
     ),
 ) -> None:
     """Analyse git history and generate improved commit messages + changelog."""
+    # --- 0. Validate flag combinations ---
+    if push and not live:
+        typer.echo("Error: --push requires --live.", err=True)
+        raise typer.Exit(1)
+
     # --- 1. Validate repo ---
     _validate_git_repo(repo_path)
 

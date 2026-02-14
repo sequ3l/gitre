@@ -423,6 +423,12 @@ class TestAnalyzeCommand:
         assert result.exit_code == 0
         mock_commit_flow.assert_called_once()
 
+    def test_analyze_push_without_live_errors(self) -> None:
+        """--push without --live should error."""
+        result = runner.invoke(app, ["analyze", "/fake/repo", "--push"])
+        assert result.exit_code == 1
+        assert "--push requires --live" in result.output
+
     @patch("gitre.cli.cache.save_analysis")
     @patch("gitre.cli._get_head_hash", return_value="abcdef")
     @patch("gitre.cli.asyncio.run")
