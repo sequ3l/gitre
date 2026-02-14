@@ -25,3 +25,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Pydantic v2 models for CommitInfo, GeneratedMessage, and AnalysisResult
 - Rich console output for progress and proposal display
 - Comprehensive test suite with autouse Claude SDK mock fixture to prevent real API calls
+- README with prerequisites, Claude Code / Agent SDK integration details, full command reference, and usage examples
