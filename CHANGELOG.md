@@ -33,3 +33,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Progress output (spinners, status messages) now always shown during analysis, not only with `--verbose`
 - `--verbose` / `-v` now adds per-commit hash detail instead of being required for any feedback
+- `git-filter-repo` moved from optional to required dependency — installed automatically with gitre
