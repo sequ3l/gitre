@@ -155,6 +155,11 @@ def analyze(
         "-v",
         help="Show detailed progress information.",
     ),
+    push: bool = typer.Option(
+        False,
+        "--push",
+        help="Force-push to remote after rewriting (requires --live).",
+    ),
 ) -> None:
     """Analyse git history and generate improved commit messages + changelog."""
     # --- 1. Validate repo ---
@@ -229,7 +234,10 @@ def analyze(
 
     # --- 10. If --live, also run commit flow ---
     if live:
-        _run_commit_flow(repo_path, result, enriched, yes=False, changelog_file=None)
+        _run_commit_flow(
+            repo_path, result, enriched,
+            yes=False, changelog_file=out_file, push=push,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +272,11 @@ def commit(
         "--yes",
         "-y",
         help="Skip confirmation prompt.",
+    ),
+    push: bool = typer.Option(
+        False,
+        "--push",
+        help="Force-push to remote after rewriting history.",
     ),
 ) -> None:
     """Load cached analysis and rewrite git history with improved messages."""
@@ -311,6 +324,7 @@ def commit(
         yes=yes,
         changelog_file=changelog,
         filtered_messages=messages,
+        push=push,
     )
 
 
@@ -402,6 +416,7 @@ def _run_commit_flow(
     yes: bool,
     changelog_file: str | None,
     filtered_messages: list[GeneratedMessage] | None = None,
+    push: bool = False,
 ) -> None:
     """Shared commit/rewrite flow used by both the commit command and --live flag.
 
@@ -409,10 +424,11 @@ def _run_commit_flow(
       1. Display proposals
       2. Confirm (unless -y)
       3. Check filter-repo availability
-      4. Rewrite history (creates backup internally)
+      4. Rewrite history (saves/restores remotes internally)
       5. Optionally write changelog
-      6. Clear cache
+      6. Commit artifacts (changelog + analysis cache)
       7. Report results
+      8. Force push (if --push)
 
     Parameters
     ----------
@@ -430,6 +446,8 @@ def _run_commit_flow(
         When provided, use these messages instead of ``result.messages``.
         This allows the ``commit`` command to pass pre-filtered messages
         (after ``--only``/``--skip`` processing).
+    push:
+        If ``True``, force-push to remote after rewriting.
     """
     messages = list(filtered_messages) if filtered_messages is not None else list(result.messages)
 
@@ -469,10 +487,24 @@ def _run_commit_flow(
         )
         rewriter.write_changelog(repo_path, changelog_content, changelog_file)
 
-    # 6. Report results
+    # 6. Commit artifacts (changelog + analysis cache)
+    try:
+        rewriter.commit_artifacts(repo_path, changelog_file=changelog_file)
+    except subprocess.CalledProcessError as exc:
+        typer.echo(f"Warning: failed to commit artifacts: {exc}", err=True)
+
+    # 7. Report results
     typer.echo(f"\nSuccessfully rewrote {len(results_map)} commit(s).")
     for short_hash, description in results_map.items():
         typer.echo(f"  {short_hash}: {description}")
+
+    # 8. Force push (opt-in)
+    if push:
+        try:
+            rewriter.force_push(repo_path)
+        except (subprocess.CalledProcessError, RuntimeError) as exc:
+            typer.echo(f"Error during push: {exc}", err=True)
+            raise typer.Exit(1)
 
 
 # ---------------------------------------------------------------------------

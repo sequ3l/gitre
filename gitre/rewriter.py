@@ -202,7 +202,51 @@ def _build_commit_callback(
 
 
 # ---------------------------------------------------------------------------
-# 5. rewrite_history
+# 5. save_remotes / restore_remotes
+# ---------------------------------------------------------------------------
+def save_remotes(repo_path: str) -> dict[str, str]:
+    """Capture all remote URLs before git-filter-repo strips them.
+
+    Returns a ``{name: url}`` dict parsed from ``git remote -v`` fetch lines.
+    """
+    result = subprocess.run(
+        ["git", "remote", "-v"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    remotes: dict[str, str] = {}
+    for line in result.stdout.strip().splitlines():
+        if "(fetch)" not in line:
+            continue
+        parts = line.split("\t", 1)
+        if len(parts) == 2:
+            name = parts[0].strip()
+            url = parts[1].replace("(fetch)", "").strip()
+            remotes[name] = url
+    return remotes
+
+
+def restore_remotes(repo_path: str, remotes: dict[str, str]) -> None:
+    """Re-add remotes that were stripped by git-filter-repo."""
+    for name, url in remotes.items():
+        subprocess.run(
+            ["git", "remote", "add", name, url],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    if remotes:
+        _console.print(
+            f"[green]Restored remote(s):[/green] "
+            + ", ".join(f"{n} ({u})" for n, u in remotes.items())
+        )
+
+
+# ---------------------------------------------------------------------------
+# 6. rewrite_history
 # ---------------------------------------------------------------------------
 def rewrite_history(
     repo_path: str,
@@ -270,10 +314,13 @@ def rewrite_history(
         hash_map[msg.hash] = new_message
         results[msg.short_hash] = f"{msg.subject}"
 
-    # --- 4. Build callback ---
+    # --- 4. Save remotes (filter-repo strips them) ---
+    remotes = save_remotes(repo_path)
+
+    # --- 5. Build callback ---
     callback_script = _build_commit_callback(hash_map)
 
-    # --- 5. Execute rewrite ---
+    # --- 6. Execute rewrite ---
     # Write callback to a temp file to avoid Windows command-line length
     # limits (8,191 chars for cmd.exe / ~32K for CreateProcess).  With
     # many commits the inline callback easily exceeds these limits.
@@ -303,6 +350,10 @@ def rewrite_history(
         )
     finally:
         Path(callback_file).unlink(missing_ok=True)
+
+    # --- 7. Restore remotes ---
+    if remotes:
+        restore_remotes(repo_path, remotes)
 
     _console.print("[green]History rewrite complete.[/green]")
 
@@ -340,7 +391,108 @@ def write_changelog(
 
 
 # ---------------------------------------------------------------------------
-# 7. display_proposals
+# 9. commit_artifacts
+# ---------------------------------------------------------------------------
+def commit_artifacts(repo_path: str, changelog_file: str | None = None) -> None:
+    """Stage and commit gitre artifacts after a history rewrite.
+
+    Commits ``.gitre/`` (analysis cache) and the changelog file if provided.
+    No-op if nothing is staged.
+
+    Parameters
+    ----------
+    repo_path:
+        Path to the root of the git repository.
+    changelog_file:
+        Path to the changelog file that was written, or ``None``.
+    """
+    files_to_add: list[str] = [".gitre/"]
+    if changelog_file:
+        target = Path(changelog_file)
+        if target.is_absolute():
+            try:
+                target = target.relative_to(Path(repo_path).resolve())
+            except ValueError:
+                pass
+        files_to_add.append(str(target))
+
+    subprocess.run(
+        ["git", "add", *files_to_add],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    # Skip commit if nothing was staged
+    status = subprocess.run(
+        ["git", "diff", "--cached", "--quiet"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if status.returncode == 0:
+        return
+
+    subprocess.run(
+        ["git", "commit", "-m", "Add changelog and gitre analysis cache"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    _console.print("[green]Committed gitre artifacts.[/green]")
+
+
+# ---------------------------------------------------------------------------
+# 10. force_push
+# ---------------------------------------------------------------------------
+def force_push(repo_path: str) -> None:
+    """Force-push the current branch to the first configured remote.
+
+    Raises
+    ------
+    RuntimeError
+        If no remotes are configured.
+    subprocess.CalledProcessError
+        If the push fails.
+    """
+    branch_result = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    branch = branch_result.stdout.strip()
+
+    remote_result = subprocess.run(
+        ["git", "remote"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    remotes = [r.strip() for r in remote_result.stdout.strip().splitlines() if r.strip()]
+    if not remotes:
+        raise RuntimeError("No remotes configured. Cannot push.")
+
+    remote = remotes[0]
+    _console.print(f"[yellow]Force-pushing {branch} to {remote}...[/yellow]")
+
+    subprocess.run(
+        ["git", "push", "--force", remote, branch],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    _console.print(f"[green]Force-pushed {branch} to {remote}.[/green]")
+
+
+# ---------------------------------------------------------------------------
+# 11. display_proposals
 # ---------------------------------------------------------------------------
 def display_proposals(
     messages: list[GeneratedMessage],

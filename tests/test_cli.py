@@ -518,7 +518,7 @@ class TestCommitCommand:
         assert "filtered_messages" in call_kwargs
         assert len(call_kwargs["filtered_messages"]) == len(fake_result.messages)
 
-    @patch("gitre.cli.cache.clear_cache")
+    @patch("gitre.cli.rewriter.commit_artifacts")
     @patch("gitre.cli.rewriter.rewrite_history", return_value={"aaa1111": "'wip' -> 'Add X'"})
     @patch("gitre.cli.rewriter.check_filter_repo", return_value=True)
     @patch("gitre.cli.rewriter.display_proposals")
@@ -533,7 +533,7 @@ class TestCommitCommand:
         mock_display: MagicMock,
         mock_check: MagicMock,
         mock_rewrite: MagicMock,
-        mock_clear: MagicMock,
+        mock_artifacts: MagicMock,
         fake_result: AnalysisResult,
     ) -> None:
         """'gitre commit' loads cache and applies rewrite through full flow (mock rewriter)."""
@@ -553,8 +553,8 @@ class TestCommitCommand:
         # History was rewritten
         mock_rewrite.assert_called_once()
         assert mock_rewrite.call_args[0][0] == "/fake/repo"
-        # Cache was cleared after successful rewrite
-        mock_clear.assert_called_once_with("/fake/repo")
+        # Artifacts were committed after rewrite
+        mock_artifacts.assert_called_once()
         # Success message in output
         assert "Successfully rewrote" in result.output
 
@@ -728,6 +728,28 @@ class TestCommitCommand:
         assert call_kwargs["yes"] is True
 
     @patch("gitre.cli._validate_git_repo")
+    @patch("gitre.cli.cache.load_analysis")
+    @patch("gitre.cli.cache.validate_cache", return_value=(True, ""))
+    @patch("gitre.cli._run_commit_flow")
+    def test_commit_push_flag(
+        self,
+        mock_flow: MagicMock,
+        mock_validate_cache: MagicMock,
+        mock_load: MagicMock,
+        mock_validate: MagicMock,
+        fake_result: AnalysisResult,
+    ) -> None:
+        """'gitre commit --push' passes push=True to _run_commit_flow."""
+        mock_load.return_value = fake_result
+
+        result = runner.invoke(app, ["commit", "/fake/repo", "--push"])
+
+        assert result.exit_code == 0
+        mock_flow.assert_called_once()
+        call_kwargs = mock_flow.call_args[1]
+        assert call_kwargs["push"] is True
+
+    @patch("gitre.cli._validate_git_repo")
     @patch("gitre.cli.cache.load_analysis", side_effect=ValueError("corrupt"))
     def test_commit_corrupt_cache(
         self,
@@ -749,7 +771,7 @@ class TestCommitCommand:
 class TestRunCommitFlow:
     """Tests for the _run_commit_flow helper."""
 
-    @patch("gitre.cli.cache.clear_cache")
+    @patch("gitre.cli.rewriter.commit_artifacts")
     @patch("gitre.cli.rewriter.rewrite_history", return_value={"aaa1111": "'wip' -> 'Add X'"})
     @patch("gitre.cli.rewriter.check_filter_repo", return_value=True)
     @patch("gitre.cli.rewriter.confirm_rewrite", return_value=True)
@@ -760,10 +782,10 @@ class TestRunCommitFlow:
         mock_confirm: MagicMock,
         mock_check: MagicMock,
         mock_rewrite: MagicMock,
-        mock_clear: MagicMock,
+        mock_artifacts: MagicMock,
         fake_result: AnalysisResult,
     ) -> None:
-        """Full commit flow: display, confirm, rewrite, clear cache."""
+        """Full commit flow: display, confirm, rewrite, commit artifacts."""
         from gitre.cli import _run_commit_flow
 
         _run_commit_flow("/fake/repo", fake_result, commits=None, yes=False, changelog_file=None)
@@ -771,7 +793,7 @@ class TestRunCommitFlow:
         mock_display.assert_called_once()
         mock_confirm.assert_called_once()
         mock_rewrite.assert_called_once()
-        mock_clear.assert_called_once_with("/fake/repo")
+        mock_artifacts.assert_called_once()
 
     @patch("gitre.cli.rewriter.confirm_rewrite", return_value=False)
     @patch("gitre.cli.rewriter.display_proposals")
@@ -789,7 +811,7 @@ class TestRunCommitFlow:
                 "/fake/repo", fake_result, commits=None, yes=False, changelog_file=None
             )
 
-    @patch("gitre.cli.cache.clear_cache")
+    @patch("gitre.cli.rewriter.commit_artifacts")
     @patch("gitre.cli.rewriter.rewrite_history", return_value={"aaa1111": "'wip' -> 'Add X'"})
     @patch("gitre.cli.rewriter.check_filter_repo", return_value=True)
     @patch("gitre.cli.rewriter.display_proposals")
@@ -798,7 +820,7 @@ class TestRunCommitFlow:
         mock_display: MagicMock,
         mock_check: MagicMock,
         mock_rewrite: MagicMock,
-        mock_clear: MagicMock,
+        mock_artifacts: MagicMock,
         fake_result: AnalysisResult,
     ) -> None:
         """--yes / -y skips the confirmation prompt."""
@@ -826,7 +848,7 @@ class TestRunCommitFlow:
                 "/fake/repo", fake_result, commits=None, yes=True, changelog_file=None
             )
 
-    @patch("gitre.cli.cache.clear_cache")
+    @patch("gitre.cli.rewriter.commit_artifacts")
     @patch("gitre.cli.formatter.format_changelog", return_value="# Changelog\n")
     @patch("gitre.cli.rewriter.write_changelog")
     @patch("gitre.cli.rewriter.rewrite_history", return_value={"aaa1111": "'wip' -> 'Add X'"})
@@ -839,7 +861,7 @@ class TestRunCommitFlow:
         mock_rewrite: MagicMock,
         mock_write_cl: MagicMock,
         mock_format_cl: MagicMock,
-        mock_clear: MagicMock,
+        mock_artifacts: MagicMock,
         fake_result: AnalysisResult,
     ) -> None:
         """changelog_file triggers changelog formatting and writing."""
@@ -887,7 +909,7 @@ class TestRunCommitFlow:
                 "/fake/repo", fake_result, commits=None, yes=True, changelog_file=None
             )
 
-    @patch("gitre.cli.cache.clear_cache")
+    @patch("gitre.cli.rewriter.commit_artifacts")
     @patch("gitre.cli.rewriter.rewrite_history", return_value={"aaa1111": "'wip' -> 'Add X'"})
     @patch("gitre.cli.rewriter.check_filter_repo", return_value=True)
     @patch("gitre.cli.rewriter.display_proposals")
@@ -896,7 +918,7 @@ class TestRunCommitFlow:
         mock_display: MagicMock,
         mock_check: MagicMock,
         mock_rewrite: MagicMock,
-        mock_clear: MagicMock,
+        mock_artifacts: MagicMock,
         fake_result: AnalysisResult,
         fake_message: GeneratedMessage,
     ) -> None:
@@ -937,7 +959,7 @@ class TestRunCommitFlow:
         assert len(rewritten_messages) == 1
         assert rewritten_messages[0].short_hash == "aaa1111"
 
-    @patch("gitre.cli.cache.clear_cache")
+    @patch("gitre.cli.rewriter.commit_artifacts")
     @patch("gitre.cli.rewriter.rewrite_history", return_value={"aaa1111": "'wip' -> 'Add X'"})
     @patch("gitre.cli.rewriter.check_filter_repo", return_value=True)
     @patch("gitre.cli.rewriter.display_proposals")
@@ -946,7 +968,7 @@ class TestRunCommitFlow:
         mock_display: MagicMock,
         mock_check: MagicMock,
         mock_rewrite: MagicMock,
-        mock_clear: MagicMock,
+        mock_artifacts: MagicMock,
         fake_result: AnalysisResult,
     ) -> None:
         """Without filtered_messages, all result.messages are used (--live path)."""
@@ -963,6 +985,74 @@ class TestRunCommitFlow:
 
         displayed_messages = mock_display.call_args[0][0]
         assert len(displayed_messages) == len(fake_result.messages)
+
+    @patch("gitre.cli.rewriter.force_push")
+    @patch("gitre.cli.rewriter.commit_artifacts")
+    @patch("gitre.cli.rewriter.rewrite_history", return_value={"aaa1111": "'wip' -> 'Add X'"})
+    @patch("gitre.cli.rewriter.check_filter_repo", return_value=True)
+    @patch("gitre.cli.rewriter.display_proposals")
+    def test_push_flag_calls_force_push(
+        self,
+        mock_display: MagicMock,
+        mock_check: MagicMock,
+        mock_rewrite: MagicMock,
+        mock_artifacts: MagicMock,
+        mock_push: MagicMock,
+        fake_result: AnalysisResult,
+    ) -> None:
+        """push=True triggers force_push after rewrite."""
+        from gitre.cli import _run_commit_flow
+
+        _run_commit_flow(
+            "/fake/repo", fake_result, commits=None, yes=True,
+            changelog_file=None, push=True,
+        )
+
+        mock_push.assert_called_once_with("/fake/repo")
+
+    @patch("gitre.cli.rewriter.commit_artifacts")
+    @patch("gitre.cli.rewriter.rewrite_history", return_value={"aaa1111": "'wip' -> 'Add X'"})
+    @patch("gitre.cli.rewriter.check_filter_repo", return_value=True)
+    @patch("gitre.cli.rewriter.display_proposals")
+    def test_no_push_by_default(
+        self,
+        mock_display: MagicMock,
+        mock_check: MagicMock,
+        mock_rewrite: MagicMock,
+        mock_artifacts: MagicMock,
+        fake_result: AnalysisResult,
+    ) -> None:
+        """push defaults to False — force_push should not be called."""
+        from gitre.cli import _run_commit_flow
+
+        with patch("gitre.cli.rewriter.force_push") as mock_push:
+            _run_commit_flow(
+                "/fake/repo", fake_result, commits=None, yes=True, changelog_file=None,
+            )
+            mock_push.assert_not_called()
+
+    @patch("gitre.cli.rewriter.force_push", side_effect=RuntimeError("No remotes"))
+    @patch("gitre.cli.rewriter.commit_artifacts")
+    @patch("gitre.cli.rewriter.rewrite_history", return_value={"aaa1111": "'wip' -> 'Add X'"})
+    @patch("gitre.cli.rewriter.check_filter_repo", return_value=True)
+    @patch("gitre.cli.rewriter.display_proposals")
+    def test_push_error_exits(
+        self,
+        mock_display: MagicMock,
+        mock_check: MagicMock,
+        mock_rewrite: MagicMock,
+        mock_artifacts: MagicMock,
+        mock_push: MagicMock,
+        fake_result: AnalysisResult,
+    ) -> None:
+        """push=True with a RuntimeError exits with code 1."""
+        from gitre.cli import _run_commit_flow
+
+        with pytest.raises(ClickExit):
+            _run_commit_flow(
+                "/fake/repo", fake_result, commits=None, yes=True,
+                changelog_file=None, push=True,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1115,7 +1205,7 @@ class TestCLIOptions:
         assert result.exit_code == 0
         # All documented options must appear
         for opt in ("--output", "--format", "--from", "--to", "--live",
-                     "--out-file", "--model", "--batch-size", "--verbose"):
+                     "--out-file", "--model", "--batch-size", "--verbose", "--push"):
             assert opt in result.output, f"Missing option {opt} in analyze help"
         # The positional argument hint
         assert "repo" in result.output.lower()
@@ -1124,5 +1214,5 @@ class TestCLIOptions:
         """'gitre commit --help' shows all commit options."""
         result = runner.invoke(app, ["commit", "--help"])
         assert result.exit_code == 0
-        for opt in ("--only", "--skip", "--changelog", "--yes"):
+        for opt in ("--only", "--skip", "--changelog", "--yes", "--push"):
             assert opt in result.output, f"Missing option {opt} in commit help"

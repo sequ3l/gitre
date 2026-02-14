@@ -19,14 +19,18 @@ import typer
 
 from gitre.models import CommitInfo, GeneratedMessage
 from gitre.rewriter import (
-    _build_content_callback_with_originals,
+    _build_commit_callback,
     build_message_callback,
     check_filter_repo,
+    commit_artifacts,
     confirm_rewrite,
     create_backup,
     display_proposals,
+    force_push,
     get_install_instructions,
+    restore_remotes,
     rewrite_history,
+    save_remotes,
     write_changelog,
 )
 
@@ -246,7 +250,7 @@ class TestCreateBackup:
 
 
 class TestBuildMessageCallback:
-    """Tests for build_message_callback() and _build_content_callback_with_originals()."""
+    """Tests for build_message_callback() and _build_commit_callback()."""
 
     def test_returns_string(self) -> None:
         """build_message_callback should always return a string."""
@@ -265,136 +269,178 @@ class TestBuildMessageCallback:
         assert isinstance(result, str)
         assert "return message" in result
 
-    def test_content_callback_contains_content_map(self) -> None:
-        """_build_content_callback_with_originals should produce CONTENT_MAP dict."""
-        pairs = [("old message", "new message")]
-        script = _build_content_callback_with_originals(pairs)
-        assert "CONTENT_MAP" in script
+    def test_commit_callback_contains_hash_map(self) -> None:
+        """_build_commit_callback should produce HASH_MAP dict."""
+        hash_map = {"abc123": "new message"}
+        script = _build_commit_callback(hash_map)
+        assert "HASH_MAP" in script
 
-    def test_content_callback_has_original_and_new(self) -> None:
-        """Generated callback should contain both original and new message strings."""
-        pairs = [("fix typo in readme", "docs: fix typo in README")]
-        script = _build_content_callback_with_originals(pairs)
-        assert "'fix typo in readme'" in script
+    def test_commit_callback_has_hash_and_message(self) -> None:
+        """Generated callback should contain both hash and new message."""
+        hash_map = {"abc123def456": "docs: fix typo in README"}
+        script = _build_commit_callback(hash_map)
+        assert "'abc123def456'" in script
         assert "'docs: fix typo in README'" in script
 
-    def test_content_callback_handles_utf8(self) -> None:
-        """Callback should decode bytes as utf-8 and encode result back."""
-        pairs = [("hello", "world")]
-        script = _build_content_callback_with_originals(pairs)
+    def test_commit_callback_uses_original_id(self) -> None:
+        """Callback should use commit.original_id for matching."""
+        hash_map = {"abc123": "new msg"}
+        script = _build_commit_callback(hash_map)
+        assert "original_id" in script
         assert "encode('utf-8')" in script
-        assert "decode('utf-8'" in script
 
-    def test_content_callback_with_multiple_pairs(self) -> None:
-        """Should handle multiple original -> new mappings in a single callback."""
-        pairs = [
-            ("msg one", "rewritten one"),
-            ("msg two", "rewritten two"),
-            ("msg three", "rewritten three"),
-        ]
-        script = _build_content_callback_with_originals(pairs)
-        for orig, new in pairs:
-            assert repr(orig) in script
-            assert repr(new) in script
+    def test_commit_callback_with_multiple_entries(self) -> None:
+        """Should handle multiple hash -> message mappings."""
+        hash_map = {
+            "aaa111": "rewritten one",
+            "bbb222": "rewritten two",
+            "ccc333": "rewritten three",
+        }
+        script = _build_commit_callback(hash_map)
+        for h, msg in hash_map.items():
+            assert repr(h) in script
+            assert repr(msg) in script
 
-    def test_content_callback_has_fallback(self) -> None:
-        """If no match, the script should fall through to 'return message'."""
-        pairs = [("old", "new")]
-        script = _build_content_callback_with_originals(pairs)
-        # Last line should be a fallback
-        lines = script.strip().split("\n")
-        assert lines[-1].strip() == "return message"
-
-    def test_content_callback_strips_messages(self) -> None:
-        """Original and new messages should be stripped of whitespace."""
-        pairs = [("  old with spaces  ", "  new with spaces  ")]
-        script = _build_content_callback_with_originals(pairs)
-        # The repr should show stripped versions
-        assert "'old with spaces'" in script
-        assert "'new with spaces'" in script
-
-    def test_generated_callback_is_valid_python(self) -> None:
-        """The generated callback should be valid Python (compilable)."""
-        pairs = [("old commit msg", "feat: new commit msg")]
-        script = _build_content_callback_with_originals(pairs)
-        # Wrap in a function to make it compilable (git-filter-repo expects
-        # code that uses `message` as input and `return` to provide output)
-        wrapped = f"def callback(message):\n"
-        for line in script.split("\n"):
-            wrapped += f"    {line}\n"
-        # Should compile without errors
-        compile(wrapped, "<test>", "exec")
+    def test_commit_callback_is_valid_python(self) -> None:
+        """The generated callback should be compilable Python."""
+        hash_map = {"abc123": "feat: new commit msg"}
+        script = _build_commit_callback(hash_map)
+        # Should compile without errors (as top-level code, not a function)
+        compile(script, "<test>", "exec")
 
 
 # ===========================================================================
-# 4. Generated callback correctly maps old messages to new messages
+# 4. save_remotes / restore_remotes
 # ===========================================================================
 
 
-class TestCallbackMapping:
-    """Test that the generated callback script actually maps messages correctly."""
+class TestSaveRemotes:
+    """Tests for save_remotes()."""
 
-    def test_single_mapping(self) -> None:
-        """Single old->new message should be matched and returned."""
-        pairs = [("fix stuff", "fix: resolve null pointer in parser")]
-        script = _build_content_callback_with_originals(pairs)
+    @patch("gitre.rewriter.subprocess.run")
+    def test_parses_fetch_urls(self, mock_run: MagicMock) -> None:
+        """Should parse origin fetch URL from git remote -v output."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="origin\thttps://github.com/user/repo.git (fetch)\norigin\thttps://github.com/user/repo.git (push)\n",
+        )
+        result = save_remotes("/fake/repo")
+        assert result == {"origin": "https://github.com/user/repo.git"}
 
-        # Execute the script with a simulated `message` (bytes)
-        result = self._exec_callback(script, b"fix stuff")
-        assert result == b"fix: resolve null pointer in parser\n"
+    @patch("gitre.rewriter.subprocess.run")
+    def test_multiple_remotes(self, mock_run: MagicMock) -> None:
+        """Should handle multiple remotes."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=(
+                "origin\thttps://github.com/user/repo.git (fetch)\n"
+                "origin\thttps://github.com/user/repo.git (push)\n"
+                "upstream\thttps://github.com/upstream/repo.git (fetch)\n"
+                "upstream\thttps://github.com/upstream/repo.git (push)\n"
+            ),
+        )
+        result = save_remotes("/fake/repo")
+        assert result == {
+            "origin": "https://github.com/user/repo.git",
+            "upstream": "https://github.com/upstream/repo.git",
+        }
 
-    def test_multiple_mappings(self) -> None:
-        """Multiple messages should each be correctly mapped."""
-        pairs = [
-            ("wip", "feat: add user authentication module"),
-            ("update", "refactor: simplify database connection pool"),
+    @patch("gitre.rewriter.subprocess.run")
+    def test_no_remotes(self, mock_run: MagicMock) -> None:
+        """Should return empty dict when no remotes configured."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        result = save_remotes("/fake/repo")
+        assert result == {}
+
+
+class TestRestoreRemotes:
+    """Tests for restore_remotes()."""
+
+    @patch("gitre.rewriter.subprocess.run")
+    def test_adds_remotes(self, mock_run: MagicMock) -> None:
+        """Should call git remote add for each remote."""
+        mock_run.return_value = MagicMock(returncode=0)
+        restore_remotes("/fake/repo", {"origin": "https://example.com/repo.git"})
+        mock_run.assert_called_once()
+        args = mock_run.call_args[0][0]
+        assert args == ["git", "remote", "add", "origin", "https://example.com/repo.git"]
+
+    @patch("gitre.rewriter.subprocess.run")
+    def test_empty_dict_is_noop(self, mock_run: MagicMock) -> None:
+        """Should not call git when no remotes to restore."""
+        restore_remotes("/fake/repo", {})
+        mock_run.assert_not_called()
+
+
+# ===========================================================================
+# 4b. commit_artifacts / force_push
+# ===========================================================================
+
+
+class TestCommitArtifacts:
+    """Tests for commit_artifacts()."""
+
+    @patch("gitre.rewriter.subprocess.run")
+    def test_stages_and_commits(self, mock_run: MagicMock) -> None:
+        """Should stage .gitre/ and commit."""
+        # git add succeeds, git diff --cached returns 1 (changes staged), git commit succeeds
+        mock_run.side_effect = [
+            MagicMock(returncode=0),  # git add
+            MagicMock(returncode=1),  # git diff --cached --quiet (changes exist)
+            MagicMock(returncode=0),  # git commit
         ]
-        script = _build_content_callback_with_originals(pairs)
+        commit_artifacts("/fake/repo")
+        assert mock_run.call_count == 3
+        # First call is git add
+        assert ".gitre/" in mock_run.call_args_list[0][0][0]
 
-        result1 = self._exec_callback(script, b"wip")
-        assert result1 == b"feat: add user authentication module\n"
+    @patch("gitre.rewriter.subprocess.run")
+    def test_includes_changelog(self, mock_run: MagicMock) -> None:
+        """Should stage changelog file when provided."""
+        mock_run.side_effect = [
+            MagicMock(returncode=0),  # git add
+            MagicMock(returncode=1),  # git diff --cached --quiet
+            MagicMock(returncode=0),  # git commit
+        ]
+        commit_artifacts("/fake/repo", changelog_file="CHANGELOG.md")
+        add_args = mock_run.call_args_list[0][0][0]
+        assert "CHANGELOG.md" in add_args
 
-        result2 = self._exec_callback(script, b"update")
-        assert result2 == b"refactor: simplify database connection pool\n"
+    @patch("gitre.rewriter.subprocess.run")
+    def test_noop_when_nothing_staged(self, mock_run: MagicMock) -> None:
+        """Should skip commit when nothing is staged."""
+        mock_run.side_effect = [
+            MagicMock(returncode=0),  # git add
+            MagicMock(returncode=0),  # git diff --cached --quiet (nothing staged)
+        ]
+        commit_artifacts("/fake/repo")
+        assert mock_run.call_count == 2  # No commit call
 
-    def test_unmatched_message_passes_through(self) -> None:
-        """Messages not in the map should be returned unchanged."""
-        pairs = [("wip", "feat: something")]
-        script = _build_content_callback_with_originals(pairs)
 
-        original = b"this is not in the map\n"
-        result = self._exec_callback(script, original)
-        assert result == original
+class TestForcePush:
+    """Tests for force_push()."""
 
-    def test_message_with_trailing_newline(self) -> None:
-        """Input message may have trailing newline; should still match after strip."""
-        pairs = [("etc", "chore: initial project setup")]
-        script = _build_content_callback_with_originals(pairs)
+    @patch("gitre.rewriter.subprocess.run")
+    def test_pushes_to_remote(self, mock_run: MagicMock) -> None:
+        """Should force push current branch to first remote."""
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="master\n"),  # rev-parse --abbrev-ref HEAD
+            MagicMock(returncode=0, stdout="origin\n"),  # git remote
+            MagicMock(returncode=0),  # git push --force
+        ]
+        force_push("/fake/repo")
+        push_args = mock_run.call_args_list[2][0][0]
+        assert push_args == ["git", "push", "--force", "origin", "master"]
 
-        result = self._exec_callback(script, b"etc\n")
-        assert result == b"chore: initial project setup\n"
-
-    def test_mapping_preserves_special_characters(self) -> None:
-        """Callback should handle messages with quotes and special chars."""
-        pairs = [("fix: it's broken", "fix: resolve apostrophe handling")]
-        script = _build_content_callback_with_originals(pairs)
-
-        result = self._exec_callback(script, b"fix: it's broken")
-        assert result == b"fix: resolve apostrophe handling\n"
-
-    @staticmethod
-    def _exec_callback(script: str, message: bytes) -> bytes:
-        """Execute a callback script with a given message and return the result.
-
-        Wraps the script in a function, calls it, and returns whatever
-        the callback returns.
-        """
-        # Build an executable wrapper
-        func_body = "\n".join(f"    {line}" for line in script.split("\n"))
-        code = f"def _callback(message):\n{func_body}\nresult = _callback(message)"
-        namespace: dict = {"message": message}
-        exec(code, namespace)
-        return namespace["result"]
+    @patch("gitre.rewriter.subprocess.run")
+    def test_no_remotes_raises(self, mock_run: MagicMock) -> None:
+        """Should raise RuntimeError when no remotes configured."""
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="master\n"),  # rev-parse
+            MagicMock(returncode=0, stdout=""),  # git remote (empty)
+        ]
+        with pytest.raises(RuntimeError, match="No remotes configured"):
+            force_push("/fake/repo")
 
 
 # ===========================================================================
@@ -560,58 +606,62 @@ class TestRewriteHistory:
     @patch("gitre.rewriter.subprocess.run")
     @patch("gitre.rewriter.create_backup", return_value="gitre-backup-test")
     @patch("gitre.rewriter.check_filter_repo", return_value=True)
+    @patch("gitre.rewriter.save_remotes", return_value={})
     def test_successful_rewrite(
         self,
+        _save_remotes: MagicMock,
         _check: MagicMock,
         _backup: MagicMock,
         mock_run: MagicMock,
     ) -> None:
-        """Should return a mapping of short_hash -> before/after descriptions."""
-        log_result = MagicMock(returncode=0, stdout="old commit msg\n")
+        """Should return a mapping of short_hash -> subject."""
         filter_result = MagicMock(returncode=0)
-        mock_run.side_effect = [log_result, filter_result]
+        mock_run.return_value = filter_result
 
         msg = _make_msg(subject="fix: resolve null pointer")
         results = rewrite_history("/fake/repo", [msg])
 
         assert isinstance(results, dict)
         assert msg.short_hash in results
-        assert "old commit msg" in results[msg.short_hash]
+        assert "fix: resolve null pointer" in results[msg.short_hash]
         _backup.assert_called_once_with("/fake/repo")
 
     @patch("gitre.rewriter.subprocess.run")
     @patch("gitre.rewriter.create_backup", return_value="gitre-backup-test")
     @patch("gitre.rewriter.check_filter_repo", return_value=True)
-    def test_rewrite_with_body(
+    @patch("gitre.rewriter.save_remotes", return_value={"origin": "https://example.com"})
+    @patch("gitre.rewriter.restore_remotes")
+    def test_rewrite_saves_and_restores_remotes(
         self,
+        mock_restore: MagicMock,
+        _save: MagicMock,
         _check: MagicMock,
         _backup: MagicMock,
         mock_run: MagicMock,
     ) -> None:
-        """When a message has a body, the new message should include it."""
-        log_result = MagicMock(returncode=0, stdout="original\n")
-        filter_result = MagicMock(returncode=0)
-        mock_run.side_effect = [log_result, filter_result]
+        """Should save remotes before and restore after rewrite."""
+        mock_run.return_value = MagicMock(returncode=0)
 
-        msg = _make_msg(
-            subject="feat: add login",
-            body="Detailed description of the login feature.",
-            changelog_category="Added",
-            changelog_entry="Added login",
-        )
-        results = rewrite_history("/fake/repo", [msg])
-        assert msg.short_hash in results
+        msg = _make_msg()
+        rewrite_history("/fake/repo", [msg])
+
+        _save.assert_called_once_with("/fake/repo")
+        mock_restore.assert_called_once_with("/fake/repo", {"origin": "https://example.com"})
 
     @patch("gitre.rewriter.subprocess.run")
     @patch("gitre.rewriter.create_backup", return_value="gitre-backup-test")
     @patch("gitre.rewriter.check_filter_repo", return_value=True)
+    @patch("gitre.rewriter.save_remotes", return_value={})
     def test_rewrite_multiple_messages(
         self,
+        _save: MagicMock,
         _check: MagicMock,
         _backup: MagicMock,
         mock_run: MagicMock,
     ) -> None:
-        """Should handle multiple messages, resolving each one."""
+        """Should handle multiple messages."""
+        mock_run.return_value = MagicMock(returncode=0)
+
         msg1 = _make_msg(hash="aaa111", short_hash="aaa111")
         msg2 = _make_msg(
             hash="bbb222",
@@ -620,11 +670,6 @@ class TestRewriteHistory:
             changelog_category="Added",
             changelog_entry="Added new thing",
         )
-
-        log1 = MagicMock(returncode=0, stdout="old msg 1\n")
-        log2 = MagicMock(returncode=0, stdout="old msg 2\n")
-        filter_result = MagicMock(returncode=0)
-        mock_run.side_effect = [log1, log2, filter_result]
 
         results = rewrite_history("/fake/repo", [msg1, msg2])
         assert len(results) == 2

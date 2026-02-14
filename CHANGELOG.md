@@ -19,6 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `.gitre/` cache directory for staging analysis results between analyze and commit
 - Cache validation with HEAD hash staleness detection
 - Automatic backup branch creation (`gitre-backup-{timestamp}`) before any history rewrite
+- Automatic remote save/restore around `git-filter-repo` — remotes are no longer stripped after history rewrite
+- Automatic artifact commit after rewrite — `.gitre/` cache and changelog are committed with a clean message
+- `--push` flag on both `analyze --live` and `commit` — force-pushes rewritten history to remote after rewrite
 - Git history rewriting via git-filter-repo integration with content-matching callbacks
 - Large diff truncation (>50KB) with file-level summaries
 - Robust multi-strategy JSON extraction from Claude responses
