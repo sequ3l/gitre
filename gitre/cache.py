@@ -14,7 +14,6 @@ from gitre.models import AnalysisResult
 
 _CACHE_DIR = ".gitre"
 _ANALYSIS_FILE = "analysis.json"
-_GITIGNORE_CONTENT = "analysis.json\n"
 
 
 def _gitre_dir(repo_path: str) -> Path:
@@ -47,12 +46,6 @@ def save_analysis(repo_path: str, result: AnalysisResult) -> None:
     data = result.model_dump(mode="json")
     analysis_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
-    # Ensure .gitre/.gitignore exists with analysis.json entry
-    inner_gitignore = gitre_dir / ".gitignore"
-    inner_gitignore.write_text(_GITIGNORE_CONTENT, encoding="utf-8")
-
-    # Auto-add '.gitre/' to the repo's root .gitignore if it exists
-    _add_to_root_gitignore(repo_path)
 
 
 def load_analysis(repo_path: str) -> AnalysisResult:
@@ -120,30 +113,3 @@ def clear_cache(repo_path: str) -> None:
         analysis_file.unlink()
 
 
-# --- private helpers --------------------------------------------------------
-
-
-def _add_to_root_gitignore(repo_path: str) -> None:
-    """Append '.gitre/' to the repo's root .gitignore if not already present.
-
-    Does nothing when the root .gitignore file does not exist (avoids
-    creating one unexpectedly).
-    """
-    root_gitignore = Path(repo_path) / ".gitignore"
-    if not root_gitignore.exists():
-        return
-
-    content = root_gitignore.read_text(encoding="utf-8")
-
-    # Check if .gitre/ is already listed (as a standalone line)
-    gitre_entry = ".gitre/"
-    lines = content.splitlines()
-    if gitre_entry in (line.strip() for line in lines):
-        return
-
-    # Append the entry with a preceding newline if the file doesn't end with one
-    suffix = "" if content.endswith("\n") else "\n"
-    root_gitignore.write_text(
-        content + suffix + gitre_entry + "\n",
-        encoding="utf-8",
-    )

@@ -2,13 +2,11 @@
 
 Covers:
   1. save_analysis creates .gitre/ dir and analysis.json with correct content
-  2. save_analysis creates .gitre/.gitignore
-  3. save_analysis appends '.gitre/' to repo's .gitignore if it exists
-  4. load_analysis reads and correctly parses saved data (round-trip)
-  5. validate_cache returns (True, '') when HEAD matches
-  6. validate_cache returns (False, warning) when HEAD has moved
-  7. clear_cache removes analysis.json
-  8. load_analysis raises FileNotFoundError when no cache exists
+  2. load_analysis reads and correctly parses saved data (round-trip)
+  3. validate_cache returns (True, '') when HEAD matches
+  4. validate_cache returns (False, warning) when HEAD has moved
+  5. clear_cache removes analysis.json
+  6. load_analysis raises FileNotFoundError when no cache exists
 
 Uses tmp_path for isolated FS tests; mini git repos via subprocess for HEAD
 hash validation.
@@ -140,7 +138,7 @@ def git_repo(tmp_path: Path) -> tuple[Path, str]:
 
 
 class TestSaveAnalysis:
-    """Test 1-3: save_analysis creates dir, files, and updates .gitignore."""
+    """Test 1: save_analysis creates dir and analysis.json."""
 
     def test_creates_gitre_dir_and_analysis_json(
         self, repo: Path, sample_result: AnalysisResult
@@ -175,40 +173,16 @@ class TestSaveAnalysis:
         )
         assert isinstance(data["analyzed_at"], str)
 
-    def test_creates_inner_gitignore(
+    def test_does_not_create_gitignore_entries(
         self, repo: Path, sample_result: AnalysisResult
     ) -> None:
-        """(2) .gitre/.gitignore is created containing 'analysis.json'."""
+        """save_analysis does not create .gitre/.gitignore or modify root .gitignore."""
         save_analysis(str(repo), sample_result)
-        inner_gi = repo / ".gitre" / ".gitignore"
-        assert inner_gi.exists()
-        assert "analysis.json" in inner_gi.read_text(encoding="utf-8")
-
-    def test_appends_to_root_gitignore(
-        self, repo: Path, sample_result: AnalysisResult
-    ) -> None:
-        """(3) '.gitre/' is appended to an existing root .gitignore."""
-        save_analysis(str(repo), sample_result)
+        # No inner .gitignore
+        assert not (repo / ".gitre" / ".gitignore").exists()
+        # Root .gitignore unchanged
         content = (repo / ".gitignore").read_text(encoding="utf-8")
-        assert ".gitre/" in content
-        # Original content preserved
-        assert "node_modules/" in content
-
-    def test_does_not_duplicate_in_root_gitignore(
-        self, repo: Path, sample_result: AnalysisResult
-    ) -> None:
-        """Calling save_analysis twice does not duplicate the .gitre/ entry."""
-        save_analysis(str(repo), sample_result)
-        save_analysis(str(repo), sample_result)
-        content = (repo / ".gitignore").read_text(encoding="utf-8")
-        assert content.count(".gitre/") == 1
-
-    def test_no_root_gitignore_does_not_create_one(
-        self, tmp_path: Path, sample_result: AnalysisResult
-    ) -> None:
-        """If no root .gitignore exists, save_analysis does not create one."""
-        save_analysis(str(tmp_path), sample_result)
-        assert not (tmp_path / ".gitignore").exists()
+        assert ".gitre/" not in content
 
     def test_creates_gitre_dir_when_none_existed(
         self, tmp_path: Path, sample_result: AnalysisResult
