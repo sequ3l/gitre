@@ -10,8 +10,21 @@ Many repositories accumulate lazy commit messages — "etc", "fix", "wip", "upda
 
 ## Prerequisites
 
-- **Python 3.11+**
 - **Claude Code CLI** — gitre calls Claude through the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-code-sdk), which wraps the Claude Code CLI. You need Claude Code installed and authenticated (either via API key or a Claude Max/Pro subscription).
+
+### Option A: Standalone executables (easiest)
+
+Download a pre-built binary from the [Releases](https://github.com/sequ3l/gitre/releases) page — no Python installation required.
+
+| Platform | Asset |
+|---|---|
+| Linux (x86_64) | `gitre-linux-amd64` |
+| macOS (Apple Silicon) | `gitre-macos-arm64` |
+| Windows (x86_64) | `gitre-windows-amd64.exe` |
+
+### Option B: Install from source
+
+- **Python 3.11+**
 - **git-filter-repo** — used for history rewriting (`gitre commit` / `--live`). Installed automatically as a dependency.
 
 ## Installation
