@@ -10,7 +10,7 @@ Many repositories accumulate lazy commit messages — "etc", "fix", "wip", "upda
 
 ## Prerequisites
 
-- **Claude Code CLI** — gitre calls Claude through the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-code-sdk), which wraps the Claude Code CLI. You need Claude Code installed and authenticated (either via API key or a Claude Max/Pro subscription).
+- **Claude Code CLI** — gitre calls Claude through the [Claude Agent SDK](https://docs.anthropic.com/en/docs/agent-sdk/overview) ([PyPI](https://pypi.org/project/claude-agent-sdk/)), which wraps the Claude Code CLI. You need Claude Code installed and authenticated (either via API key or a [Claude Max](https://claude.com/pricing/max) subscription).
 
 ### Option A: Native installers
 
@@ -60,10 +60,10 @@ pip install -e ".[dev]"
 ```
 
 This installs gitre along with its dependencies:
-- `typer[all]` — CLI framework with rich output
-- `pydantic` — data validation
-- `claude-agent-sdk` — Claude Code integration
-- `git-filter-repo` — git history rewriting
+- [`typer[all]`](https://typer.tiangolo.com/) — CLI framework with rich output
+- [`pydantic`](https://docs.pydantic.dev/) — data validation
+- [`claude-agent-sdk`](https://pypi.org/project/claude-agent-sdk/) — Claude Agent SDK integration
+- [`git-filter-repo`](https://github.com/newren/git-filter-repo) — git history rewriting
 
 ## How It Works
 
