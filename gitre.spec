@@ -14,14 +14,27 @@ from PyInstaller.utils.hooks import collect_submodules, collect_data_files, copy
 
 block_cipher = None
 
-# Collect submodules that PyInstaller may miss due to lazy/conditional imports.
+# Collect ALL submodules for packages that use dynamic imports
+# (importlib.import_module, lazy loading, conditional imports, etc.)
+# which are invisible to PyInstaller's static analysis.
 hidden = (
     collect_submodules('gitre')
     + collect_submodules('claude_agent_sdk')
     + collect_submodules('mcp')
+    # rich._unicode_data dynamically loads versioned unicode modules
+    # via importlib.import_module() — must be explicitly collected
+    + collect_submodules('rich')
+    + collect_submodules('typer')
+    + collect_submodules('click')
+    + collect_submodules('pydantic')
+    + collect_submodules('pydantic_core')
+    + collect_submodules('httpx')
+    + collect_submodules('httpcore')
+    + collect_submodules('anyio')
+    + collect_submodules('markdown_it')
+    + collect_submodules('pygments')
     + [
         'git_filter_repo',
-        'httpx',
         'httpx_sse',
         'jsonschema',
         'pydantic_settings',
@@ -29,6 +42,8 @@ hidden = (
         'jwt',
         'multipart',
         'typing_inspection',
+        'shellingham',
+        'sniffio',
     ]
 )
 
