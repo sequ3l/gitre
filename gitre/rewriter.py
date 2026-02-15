@@ -36,7 +36,7 @@ def check_filter_repo() -> bool:
     Returns ``True`` if the library is available, ``False`` otherwise.
     """
     try:
-        import git_filter_repo  # noqa: F401
+        import git_filter_repo  # type: ignore[import-untyped]  # noqa: F401
         return True
     except ImportError:
         return False
