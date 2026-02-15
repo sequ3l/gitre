@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Add native OS installers to the release workflow: Windows installer (Inno Setup), macOS `.pkg`, and Linux `.deb`/`.rpm` packages. Installers handle PATH setup automatically. Standalone binaries are still included alongside the installers.
 - Initial release of gitre CLI with analyze and commit commands for AI-powered git commit message generation, Keep a Changelog formatting, cache management, and git history rewriting via git-filter-repo.
 - README with prerequisites, Claude Code / Agent SDK integration details, full command reference with option tables, usage examples, safety notes, and project structure overview.
 - CLAUDE.md project instructions with workflow reminders and Claude Agent SDK configuration notes.

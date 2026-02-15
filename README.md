@@ -12,17 +12,26 @@ Many repositories accumulate lazy commit messages — "etc", "fix", "wip", "upda
 
 - **Claude Code CLI** — gitre calls Claude through the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-code-sdk), which wraps the Claude Code CLI. You need Claude Code installed and authenticated (either via API key or a Claude Max/Pro subscription).
 
-### Option A: Standalone executables
+### Option A: Native installers
 
-Download a pre-built binary from the [Releases](https://github.com/sequ3l/gitre/releases) page — no Python installation required.
+Download an installer from the [Releases](https://github.com/sequ3l/gitre/releases) page — no Python installation required. The installer handles PATH setup automatically.
+
+| Platform | Asset | Install method |
+|---|---|---|
+| Windows (x86_64) | `gitre-windows-amd64-setup.exe` | Run the installer wizard |
+| macOS (Apple Silicon) | `gitre-macos-arm64.pkg` | Double-click or `sudo installer -pkg gitre-macos-arm64.pkg -target /` |
+| Linux (x86_64) | `gitre-linux-amd64.deb` | `sudo dpkg -i gitre-linux-amd64.deb` |
+| Linux (x86_64) | `gitre-linux-amd64.rpm` | `sudo rpm -i gitre-linux-amd64.rpm` |
+
+### Option B: Standalone binaries
+
+Also available on the [Releases](https://github.com/sequ3l/gitre/releases) page — single-file executables with no installer. You will need to add the binary to your `PATH` manually.
 
 | Platform | Asset |
 |---|---|
 | Linux (x86_64) | `gitre-linux-amd64` |
 | macOS (Apple Silicon) | `gitre-macos-arm64` |
 | Windows (x86_64) | `gitre-windows-amd64.exe` |
-
-After downloading, add the binary to your `PATH` so you can run `gitre` from anywhere:
 
 **Linux / macOS:**
 
@@ -42,13 +51,7 @@ sudo chmod +x /usr/local/bin/gitre
    - Click **Environment Variables**
    - Under **User variables**, edit `Path` and add the directory (e.g. `C:\Tools\`)
 
-Verify the installation:
-
-```bash
-gitre --help
-```
-
-### Option B: Install from source
+### Option C: Install from source
 
 Requires **Python 3.11+**. git-filter-repo (used for history rewriting) is installed automatically as a dependency.
 

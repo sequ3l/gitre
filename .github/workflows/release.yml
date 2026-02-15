@@ -68,6 +68,119 @@ jobs:
           name: ${{ matrix.artifact }}
           path: dist/${{ matrix.artifact }}
 
+      # ── Windows installer (Inno Setup) ──────────────────────────────
+
+      - name: Install Inno Setup
+        if: runner.os == 'Windows'
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" \
+            /DMyAppVersion="$VERSION" \
+            installers/windows/gitre.iss
+
+      - name: Upload Windows installer
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitre-windows-amd64-setup.exe
+          path: dist/gitre-windows-amd64-setup.exe
+
+      # ── macOS installer (.pkg) ──────────────────────────────────────
+
+      - name: Build macOS pkg installer
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+
+          mkdir -p pkg-root/usr/local/bin
+          cp dist/gitre-macos-arm64 pkg-root/usr/local/bin/gitre
+          chmod 755 pkg-root/usr/local/bin/gitre
+
+          pkgbuild \
+            --root pkg-root \
+            --identifier com.gitre.cli \
+            --version "$VERSION" \
+            --install-location / \
+            dist/gitre-component.pkg
+
+          productbuild \
+            --package dist/gitre-component.pkg \
+            --identifier com.gitre.cli \
+            --version "$VERSION" \
+            dist/gitre-macos-arm64.pkg
+
+          rm dist/gitre-component.pkg
+
+      - name: Upload macOS pkg
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitre-macos-arm64.pkg
+          path: dist/gitre-macos-arm64.pkg
+
+      # ── Linux installers (.deb + .rpm via fpm) ─────────────────────
+
+      - name: Install fpm
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ruby ruby-dev rubygems rpm
+          sudo gem install fpm --no-document
+
+      - name: Build Linux packages
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          chmod 755 dist/gitre-linux-amd64
+
+          fpm -s dir -t deb \
+            -n gitre -v "$VERSION" \
+            --description "AI-powered Git assistant for intelligent repository management" \
+            --license "MIT" \
+            --maintainer "gitre contributors" \
+            --url "https://github.com/sequ3l/gitre" \
+            --depends git \
+            --deb-no-default-config-files \
+            -p dist/gitre-linux-amd64.deb \
+            dist/gitre-linux-amd64=/usr/local/bin/gitre
+
+          fpm -s dir -t rpm \
+            -n gitre -v "$VERSION" \
+            --description "AI-powered Git assistant for intelligent repository management" \
+            --license "MIT" \
+            --maintainer "gitre contributors" \
+            --url "https://github.com/sequ3l/gitre" \
+            --depends git \
+            -p dist/gitre-linux-amd64.rpm \
+            dist/gitre-linux-amd64=/usr/local/bin/gitre
+
+      - name: Upload deb package
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitre-linux-amd64.deb
+          path: dist/gitre-linux-amd64.deb
+
+      - name: Upload rpm package
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitre-linux-amd64.rpm
+          path: dist/gitre-linux-amd64.rpm
+
   release:
     needs: build
     runs-on: ubuntu-latest
@@ -85,6 +198,10 @@ jobs:
             gitre-windows-amd64.exe/gitre-windows-amd64.exe
             gitre-linux-amd64/gitre-linux-amd64
             gitre-macos-arm64/gitre-macos-arm64
+            gitre-windows-amd64-setup.exe/gitre-windows-amd64-setup.exe
+            gitre-macos-arm64.pkg/gitre-macos-arm64.pkg
+            gitre-linux-amd64.deb/gitre-linux-amd64.deb
+            gitre-linux-amd64.rpm/gitre-linux-amd64.rpm
           generate_release_notes: true
           draft: false
           prerelease: false
