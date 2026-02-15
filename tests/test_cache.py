@@ -22,7 +22,7 @@ from unittest.mock import patch
 
 import pytest
 
-from gitre.cache import clear_cache, load_analysis, save_analysis, validate_cache
+from gitre.cache import can_resume, clear_cache, load_analysis, save_analysis, validate_cache
 from gitre.models import AnalysisResult, GeneratedMessage
 
 # ---------------------------------------------------------------------------
@@ -393,3 +393,72 @@ class TestClearCache:
         """clear_cache is a no-op when .gitre/ directory doesn't exist."""
         assert not (tmp_path / ".gitre").exists()
         clear_cache(str(tmp_path))  # Should not raise
+
+
+# ── can_resume ────────────────────────────────────────────────────────
+
+
+class TestCanResume:
+    """Tests for can_resume() — partial analysis resume detection."""
+
+    def test_no_cache_returns_none(self, tmp_path: Path) -> None:
+        """No cache file => (None, empty set)."""
+        result, done = can_resume(str(tmp_path), "abc123", None, None)
+        assert result is None
+        assert done == set()
+
+    def test_matching_cache_returns_done_hashes(
+        self, repo: Path, sample_result: AnalysisResult
+    ) -> None:
+        """Compatible cache returns the result and set of analyzed hashes."""
+        save_analysis(str(repo), sample_result)
+        result, done = can_resume(
+            str(repo),
+            sample_result.head_hash,
+            sample_result.from_ref,
+            sample_result.to_ref,
+        )
+        assert result is not None
+        assert done == {m.hash for m in sample_result.messages}
+
+    def test_different_head_returns_none(
+        self, repo: Path, sample_result: AnalysisResult
+    ) -> None:
+        """Different head_hash => not resumable."""
+        save_analysis(str(repo), sample_result)
+        result, done = can_resume(
+            str(repo), "different_head", sample_result.from_ref, sample_result.to_ref,
+        )
+        assert result is None
+        assert done == set()
+
+    def test_different_from_ref_returns_none(
+        self, repo: Path, sample_result: AnalysisResult
+    ) -> None:
+        """Different from_ref => not resumable."""
+        save_analysis(str(repo), sample_result)
+        result, done = can_resume(
+            str(repo), sample_result.head_hash, "v2.0.0", sample_result.to_ref,
+        )
+        assert result is None
+        assert done == set()
+
+    def test_different_to_ref_returns_none(
+        self, repo: Path, sample_result: AnalysisResult
+    ) -> None:
+        """Different to_ref => not resumable."""
+        save_analysis(str(repo), sample_result)
+        result, done = can_resume(
+            str(repo), sample_result.head_hash, sample_result.from_ref, "v0.5.0",
+        )
+        assert result is None
+        assert done == set()
+
+    def test_corrupt_cache_returns_none(self, tmp_path: Path) -> None:
+        """Corrupt/invalid JSON cache => (None, empty set)."""
+        gitre_dir = tmp_path / ".gitre"
+        gitre_dir.mkdir()
+        (gitre_dir / "analysis.json").write_text("not valid json", encoding="utf-8")
+        result, done = can_resume(str(tmp_path), "abc123", None, None)
+        assert result is None
+        assert done == set()

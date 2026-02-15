@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import subprocess
 import sys
+from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
 
@@ -201,35 +202,77 @@ def analyze(
             enriched.append(analyzer.enrich_commit(repo_path, c))
             progress.advance(task)
 
-    # --- 4. Generate messages ---
-    _console.print("[cyan]Generating messages via Claude…[/cyan]")
-
-    try:
-        messages = _run_generation(enriched, repo_path, model, batch_size, verbose)
-    except RuntimeError as exc:
-        typer.echo(f"Error generating messages: {exc}", err=True)
-        raise typer.Exit(1)
-
-    # --- 5. Build AnalysisResult ---
+    # --- 4. Check for resumable cache ---
     head_hash = _get_head_hash(repo_path)
     tags = _build_tags_dict(enriched)
-
-    result = AnalysisResult(
-        repo_path=repo_path,
-        head_hash=head_hash,
-        from_ref=from_ref,
-        to_ref=to_ref,
-        commits_analyzed=len(enriched),
-        messages=messages,
-        tags=tags,
+    cached_result, done_hashes = cache.can_resume(
+        repo_path, head_hash, from_ref, to_ref,
     )
+
+    if done_hashes:
+        cached_messages = list(cached_result.messages)  # type: ignore[union-attr]
+        remaining = [c for c in enriched if c.hash not in done_hashes]
+        _console.print(
+            f"[green]Resuming: {len(done_hashes)} commit(s) cached, "
+            f"{len(remaining)} remaining.[/green]"
+        )
+    else:
+        cached_messages = []
+        remaining = enriched
+
+    # --- 5. Generate messages (or skip if all cached) ---
+    if not remaining:
+        _console.print("[green]All commits already analyzed. Using cached results.[/green]")
+        assert cached_result is not None  # guaranteed when done_hashes is non-empty
+        result = cached_result
+        all_messages = list(result.messages)
+    else:
+        _console.print("[cyan]Generating messages via Claude…[/cyan]")
+
+        def _save_progress(new_messages: list[GeneratedMessage]) -> None:
+            """Save incremental progress after each commit/batch."""
+            merged = cached_messages + new_messages
+            partial = AnalysisResult(
+                repo_path=repo_path,
+                head_hash=head_hash,
+                from_ref=from_ref,
+                to_ref=to_ref,
+                commits_analyzed=len(merged),
+                messages=merged,
+                tags=tags,
+            )
+            cache.save_analysis(repo_path, partial)
+
+        try:
+            new_messages = _run_generation(
+                remaining, repo_path, model, batch_size, verbose,
+                on_progress=_save_progress,
+            )
+        except Exception as exc:
+            _console.print(
+                f"[red]Error during analysis: {exc}[/red]\n"
+                f"[yellow]Progress saved ({len(cached_messages)} + partial). "
+                f"Re-run to resume.[/yellow]"
+            )
+            raise typer.Exit(1)
+
+        all_messages = cached_messages + new_messages
+        result = AnalysisResult(
+            repo_path=repo_path,
+            head_hash=head_hash,
+            from_ref=from_ref,
+            to_ref=to_ref,
+            commits_analyzed=len(all_messages),
+            messages=all_messages,
+            tags=tags,
+        )
 
     # --- 6. Save to cache ---
     cache.save_analysis(repo_path, result)
     _console.print("[green]Analysis saved to cache.[/green]")
 
     # --- 7. Format output ---
-    formatted = _format_output(output, messages, enriched, tags, format)
+    formatted = _format_output(output, all_messages, enriched, tags, format)
 
     # --- 8. Display output ---
     typer.echo(formatted)
@@ -475,6 +518,8 @@ def _run_generation(
     model: str,
     batch_size: int,
     verbose: bool,
+    *,
+    on_progress: Callable[[list[GeneratedMessage]], None] | None = None,
 ) -> list[GeneratedMessage]:
     """Drive message generation, single or batch, via asyncio.run()."""
     messages: list[GeneratedMessage] = []
@@ -496,6 +541,8 @@ def _run_generation(
                     msg = await generator.generate_message(c, cwd=repo_path, model=model)
                     results.append(msg)
                     progress.advance(task)
+                    if on_progress:
+                        on_progress(list(results))
                 return results
 
             messages = asyncio.run(_generate_singles())
@@ -521,6 +568,8 @@ def _run_generation(
                     )
                     all_messages.extend(batch_result.messages)
                     progress.advance(task)
+                    if on_progress:
+                        on_progress(list(all_messages))
                 return all_messages
 
             messages = asyncio.run(_generate_batch())

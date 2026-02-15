@@ -281,7 +281,7 @@ class TestAnalyzeCommand:
         mock_save: MagicMock,
         fake_commit: CommitInfo,
     ) -> None:
-        """Analyze handles RuntimeError from generation."""
+        """Analyze handles errors from generation and tells user to resume."""
         mock_get_commits.return_value = [fake_commit]
         mock_enrich.return_value = fake_commit
         mock_asyncio_run.side_effect = RuntimeError("SDK not installed")
@@ -289,7 +289,9 @@ class TestAnalyzeCommand:
         result = runner.invoke(app, ["analyze", "/fake/repo"])
 
         assert result.exit_code == 1
-        assert "Error generating messages" in result.output
+        plain = _strip_ansi(result.output)
+        assert "Error during analysis" in plain
+        assert "Re-run to resume" in plain
 
     @patch("gitre.cli.cache.save_analysis")
     @patch("gitre.cli._get_head_hash", return_value="abcdef")
@@ -436,6 +438,94 @@ class TestAnalyzeCommand:
         result = runner.invoke(app, ["analyze", "/fake/repo", "--push"])
         assert result.exit_code == 1
         assert "--push requires --live" in result.output
+
+    @patch("gitre.cli.cache.save_analysis")
+    @patch("gitre.cli.cache.can_resume")
+    @patch("gitre.cli._get_head_hash", return_value="abcdef")
+    @patch("gitre.cli.asyncio.run")
+    @patch("gitre.cli.analyzer.enrich_commit")
+    @patch("gitre.cli.analyzer.get_commits")
+    @patch("gitre.cli._validate_git_repo")
+    def test_analyze_resumes_from_partial_cache(
+        self,
+        mock_validate: MagicMock,
+        mock_get_commits: MagicMock,
+        mock_enrich: MagicMock,
+        mock_asyncio_run: MagicMock,
+        mock_head: MagicMock,
+        mock_can_resume: MagicMock,
+        mock_save: MagicMock,
+        fake_commit: CommitInfo,
+        fake_message: GeneratedMessage,
+    ) -> None:
+        """Analyze resumes from partial cache, skipping already-analyzed commits."""
+        # Two commits: first is already cached, second needs generation
+        commit_2 = fake_commit.model_copy(
+            update={"hash": "bbb2222222222222222222222222222222222222", "short_hash": "bbb2222"},
+        )
+        msg_2 = fake_message.model_copy(
+            update={"hash": "bbb2222222222222222222222222222222222222", "short_hash": "bbb2222"},
+        )
+
+        mock_get_commits.return_value = [fake_commit, commit_2]
+        mock_enrich.side_effect = lambda _rp, c: c
+
+        # Simulate partial cache with first commit already analyzed
+        cached_result = AnalysisResult(
+            repo_path="/fake/repo",
+            head_hash="abcdef",
+            commits_analyzed=1,
+            messages=[fake_message],
+            tags={fake_commit.hash: "v1.0.0"},
+        )
+        mock_can_resume.return_value = (cached_result, {fake_commit.hash})
+        mock_asyncio_run.return_value = [msg_2]
+
+        result = runner.invoke(app, ["analyze", "/fake/repo"])
+
+        assert result.exit_code == 0
+        plain = _strip_ansi(result.output)
+        assert "Resuming" in plain
+        assert "1 commit(s) cached" in plain
+        assert "1 remaining" in plain
+
+    @patch("gitre.cli.cache.save_analysis")
+    @patch("gitre.cli.cache.can_resume")
+    @patch("gitre.cli._get_head_hash", return_value="abcdef")
+    @patch("gitre.cli.analyzer.enrich_commit")
+    @patch("gitre.cli.analyzer.get_commits")
+    @patch("gitre.cli._validate_git_repo")
+    def test_analyze_all_cached_skips_generation(
+        self,
+        mock_validate: MagicMock,
+        mock_get_commits: MagicMock,
+        mock_enrich: MagicMock,
+        mock_head: MagicMock,
+        mock_can_resume: MagicMock,
+        mock_save: MagicMock,
+        fake_commit: CommitInfo,
+        fake_message: GeneratedMessage,
+    ) -> None:
+        """When all commits are cached, generation is skipped entirely."""
+        mock_get_commits.return_value = [fake_commit]
+        mock_enrich.return_value = fake_commit
+
+        cached_result = AnalysisResult(
+            repo_path="/fake/repo",
+            head_hash="abcdef",
+            commits_analyzed=1,
+            messages=[fake_message],
+            tags={fake_commit.hash: "v1.0.0"},
+        )
+        mock_can_resume.return_value = (cached_result, {fake_commit.hash})
+
+        with patch("gitre.cli.asyncio.run") as mock_asyncio_run:
+            result = runner.invoke(app, ["analyze", "/fake/repo"])
+
+            assert result.exit_code == 0
+            plain = _strip_ansi(result.output)
+            assert "All commits already analyzed" in plain
+            mock_asyncio_run.assert_not_called()
 
     @patch("gitre.cli.cache.save_analysis")
     @patch("gitre.cli._get_head_hash", return_value="abcdef")

@@ -100,6 +100,37 @@ def validate_cache(repo_path: str, result: AnalysisResult) -> tuple[bool, str]:
     )
 
 
+def can_resume(
+    repo_path: str,
+    head_hash: str,
+    from_ref: str | None,
+    to_ref: str | None,
+) -> tuple[AnalysisResult | None, set[str]]:
+    """Check if a previous analysis can be resumed.
+
+    Resume is valid when analysis.json exists and was produced for the
+    same HEAD and commit range (from_ref / to_ref).
+
+    Returns:
+        A tuple of (cached_result, already_done_hashes).
+        Returns (None, set()) if no compatible cache exists.
+    """
+    try:
+        result = load_analysis(repo_path)
+    except (FileNotFoundError, Exception):
+        return None, set()
+
+    if (
+        result.head_hash == head_hash
+        and result.from_ref == from_ref
+        and result.to_ref == to_ref
+    ):
+        done = {m.hash for m in result.messages}
+        return result, done
+
+    return None, set()
+
+
 def clear_cache(repo_path: str) -> None:
     """Remove .gitre/analysis.json if it exists.
 
