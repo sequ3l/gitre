@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Add GitHub Actions release workflow and PyInstaller spec for building standalone executables on Windows (amd64), Linux (amd64), and macOS (arm64). Tag a `v*` release to trigger automated builds and GitHub Release creation.
+
+### Changed
+- Refactor git-filter-repo integration from subprocess calls to Python library API (`RepoFilter`), bundling it into the executable so users no longer need to install git-filter-repo separately.
 - Add `gitre label` command: generate AI-powered commit messages for staged changes and commit in one step, with `--all` to stage everything, `--push` for regular push, and `--model` to pick the Claude model.
 - Initial release of gitre CLI with `analyze` and `commit` commands for AI-powered git commit message reconstruction, Keep a Changelog output, cache management, git-filter-repo history rewriting, and a full test suite.
 - README with prerequisites, Claude Code / Agent SDK integration details, full command reference with option tables, usage examples, safety notes, and project structure overview.

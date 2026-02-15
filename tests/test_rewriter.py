@@ -20,6 +20,7 @@ import typer
 from gitre.models import CommitInfo, GeneratedMessage
 from gitre.rewriter import (
     _build_commit_callback,
+    _make_commit_callback,
     build_message_callback,
     check_filter_repo,
     commit_artifacts,
@@ -37,17 +38,13 @@ from gitre.rewriter import (
 # Detect git-filter-repo availability for skipif markers
 # ---------------------------------------------------------------------------
 
+
 def _has_filter_repo() -> bool:
-    """Return True if git-filter-repo is available on the system."""
+    """Return True if git_filter_repo can be imported."""
     try:
-        result = subprocess.run(
-            ["git", "filter-repo", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        import git_filter_repo  # noqa: F401
+        return True
+    except ImportError:
         return False
 
 
@@ -103,62 +100,42 @@ def _make_commit(
 
 
 # ===========================================================================
-# 1. check_filter_repo — returns correct bool based on availability
+# 1. check_filter_repo — returns correct bool based on import availability
 # ===========================================================================
 
 
 class TestCheckFilterRepo:
     """Tests for check_filter_repo()."""
 
-    @patch("gitre.rewriter.subprocess.run")
-    def test_returns_true_when_available(self, mock_run: MagicMock) -> None:
-        """Should return True when git-filter-repo exits with code 0."""
-        mock_run.return_value = MagicMock(returncode=0)
-        assert check_filter_repo() is True
-        mock_run.assert_called_once()
-        args = mock_run.call_args
-        assert args[0][0] == ["git", "filter-repo", "--version"]
+    def test_returns_true_when_importable(self) -> None:
+        """Should return True when git_filter_repo can be imported."""
+        mock_module = MagicMock()
+        with patch.dict("sys.modules", {"git_filter_repo": mock_module}):
+            assert check_filter_repo() is True
 
-    @patch("gitre.rewriter.subprocess.run")
-    def test_returns_false_on_nonzero_exit(self, mock_run: MagicMock) -> None:
-        """Should return False when git-filter-repo exits with non-zero code."""
-        mock_run.return_value = MagicMock(returncode=1)
-        assert check_filter_repo() is False
+    def test_returns_false_when_not_importable(self) -> None:
+        """Should return False when git_filter_repo cannot be imported."""
+        import sys
+        # Temporarily remove git_filter_repo from modules if present
+        saved = sys.modules.pop("git_filter_repo", None)
+        try:
+            with patch("builtins.__import__", side_effect=_import_raiser("git_filter_repo")):
+                assert check_filter_repo() is False
+        finally:
+            if saved is not None:
+                sys.modules["git_filter_repo"] = saved
 
-    @patch("gitre.rewriter.subprocess.run", side_effect=FileNotFoundError)
-    def test_returns_false_on_file_not_found(self, mock_run: MagicMock) -> None:
-        """Should return False when git binary is not found."""
-        assert check_filter_repo() is False
 
-    @patch(
-        "gitre.rewriter.subprocess.run",
-        side_effect=subprocess.TimeoutExpired(cmd="git", timeout=15),
-    )
-    def test_returns_false_on_timeout(self, mock_run: MagicMock) -> None:
-        """Should return False when subprocess times out."""
-        assert check_filter_repo() is False
+def _import_raiser(blocked_module: str):
+    """Return an __import__ replacement that blocks a specific module."""
+    real_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
 
-    @patch("gitre.rewriter.subprocess.run", side_effect=OSError("boom"))
-    def test_returns_false_on_os_error(self, mock_run: MagicMock) -> None:
-        """Should return False on generic OSError."""
-        assert check_filter_repo() is False
+    def _fake_import(name, *args, **kwargs):
+        if name == blocked_module:
+            raise ImportError(f"No module named '{blocked_module}'")
+        return real_import(name, *args, **kwargs)
 
-    @patch("gitre.rewriter.subprocess.run")
-    def test_passes_correct_timeout(self, mock_run: MagicMock) -> None:
-        """Should pass timeout=15 to subprocess.run."""
-        mock_run.return_value = MagicMock(returncode=0)
-        check_filter_repo()
-        _, kwargs = mock_run.call_args
-        assert kwargs["timeout"] == 15
-
-    @patch("gitre.rewriter.subprocess.run")
-    def test_captures_output(self, mock_run: MagicMock) -> None:
-        """Should set capture_output=True and text=True."""
-        mock_run.return_value = MagicMock(returncode=0)
-        check_filter_repo()
-        _, kwargs = mock_run.call_args
-        assert kwargs["capture_output"] is True
-        assert kwargs["text"] is True
+    return _fake_import
 
 
 # ===========================================================================
@@ -305,6 +282,79 @@ class TestBuildMessageCallback:
         script = _build_commit_callback(hash_map)
         # Should compile without errors (as top-level code, not a function)
         compile(script, "<test>", "exec")
+
+
+# ===========================================================================
+# 3b. _make_commit_callback — callable commit callback
+# ===========================================================================
+
+
+class TestMakeCommitCallback:
+    """Tests for _make_commit_callback()."""
+
+    def test_returns_callable(self) -> None:
+        """Should return a callable."""
+        cb = _make_commit_callback({"abc123": "new msg"})
+        assert callable(cb)
+
+    def test_replaces_matching_commit_message(self) -> None:
+        """Should replace commit.message when original_id matches."""
+        hash_map = {"abc123def456": "fix: resolved bug"}
+        cb = _make_commit_callback(hash_map)
+
+        commit = MagicMock()
+        commit.original_id = b"abc123def456"
+        commit.message = b"old message\n"
+
+        cb(commit, {})
+
+        assert commit.message == b"fix: resolved bug\n"
+
+    def test_leaves_non_matching_commit_unchanged(self) -> None:
+        """Should not modify commits whose original_id is not in the map."""
+        hash_map = {"abc123def456": "fix: resolved bug"}
+        cb = _make_commit_callback(hash_map)
+
+        commit = MagicMock()
+        commit.original_id = b"zzz999888777"
+        commit.message = b"original message\n"
+
+        cb(commit, {})
+
+        assert commit.message == b"original message\n"
+
+    def test_handles_string_original_id(self) -> None:
+        """Should handle original_id as string (not just bytes)."""
+        hash_map = {"abc123def456": "fix: resolved bug"}
+        cb = _make_commit_callback(hash_map)
+
+        commit = MagicMock()
+        commit.original_id = "abc123def456"
+        commit.message = b"old message\n"
+
+        cb(commit, {})
+
+        assert commit.message == b"fix: resolved bug\n"
+
+    def test_multiple_hashes(self) -> None:
+        """Should correctly map multiple hashes to different messages."""
+        hash_map = {
+            "aaa111": "feat: first",
+            "bbb222": "fix: second",
+        }
+        cb = _make_commit_callback(hash_map)
+
+        commit1 = MagicMock()
+        commit1.original_id = b"aaa111"
+        commit1.message = b"old1\n"
+        cb(commit1, {})
+        assert commit1.message == b"feat: first\n"
+
+        commit2 = MagicMock()
+        commit2.original_id = b"bbb222"
+        commit2.message = b"old2\n"
+        cb(commit2, {})
+        assert commit2.message == b"fix: second\n"
 
 
 # ===========================================================================
@@ -613,7 +663,7 @@ class TestCreateBackupIntegration:
 
 
 class TestRewriteHistory:
-    """Tests for rewrite_history() with mocked subprocess."""
+    """Tests for rewrite_history() with mocked git_filter_repo."""
 
     @patch("gitre.rewriter.check_filter_repo", return_value=False)
     def test_raises_when_filter_repo_missing(self, _mock: MagicMock) -> None:
@@ -633,16 +683,20 @@ class TestRewriteHistory:
         mock_run: MagicMock,
     ) -> None:
         """Should return a mapping of short_hash -> subject."""
-        filter_result = MagicMock(returncode=0)
-        mock_run.return_value = filter_result
+        mock_gfr = MagicMock()
+        mock_filter = MagicMock()
+        mock_gfr.FilteringOptions.parse_args.return_value = MagicMock()
+        mock_gfr.RepoFilter.return_value = mock_filter
 
-        msg = _make_msg(subject="fix: resolve null pointer")
-        results = rewrite_history("/fake/repo", [msg])
+        with patch.dict("sys.modules", {"git_filter_repo": mock_gfr}):
+            msg = _make_msg(subject="fix: resolve null pointer")
+            results = rewrite_history("/fake/repo", [msg])
 
         assert isinstance(results, dict)
         assert msg.short_hash in results
         assert "fix: resolve null pointer" in results[msg.short_hash]
         _backup.assert_called_once_with("/fake/repo")
+        mock_filter.run.assert_called_once()
 
     @patch("gitre.rewriter.subprocess.run")
     @patch("gitre.rewriter.create_backup", return_value="gitre-backup-test")
@@ -658,10 +712,13 @@ class TestRewriteHistory:
         mock_run: MagicMock,
     ) -> None:
         """Should save remotes before and restore after rewrite."""
-        mock_run.return_value = MagicMock(returncode=0)
+        mock_gfr = MagicMock()
+        mock_gfr.FilteringOptions.parse_args.return_value = MagicMock()
+        mock_gfr.RepoFilter.return_value = MagicMock()
 
-        msg = _make_msg()
-        rewrite_history("/fake/repo", [msg])
+        with patch.dict("sys.modules", {"git_filter_repo": mock_gfr}):
+            msg = _make_msg()
+            rewrite_history("/fake/repo", [msg])
 
         _save.assert_called_once_with("/fake/repo")
         mock_restore.assert_called_once_with("/fake/repo", {"origin": "https://example.com"})
@@ -678,18 +735,22 @@ class TestRewriteHistory:
         mock_run: MagicMock,
     ) -> None:
         """Should handle multiple messages."""
-        mock_run.return_value = MagicMock(returncode=0)
+        mock_gfr = MagicMock()
+        mock_gfr.FilteringOptions.parse_args.return_value = MagicMock()
+        mock_gfr.RepoFilter.return_value = MagicMock()
 
-        msg1 = _make_msg(hash="aaa111", short_hash="aaa111")
-        msg2 = _make_msg(
-            hash="bbb222",
-            short_hash="bbb222",
-            subject="feat: new thing",
-            changelog_category="Added",
-            changelog_entry="Added new thing",
-        )
+        with patch.dict("sys.modules", {"git_filter_repo": mock_gfr}):
+            msg1 = _make_msg(hash="aaa111", short_hash="aaa111")
+            msg2 = _make_msg(
+                hash="bbb222",
+                short_hash="bbb222",
+                subject="feat: new thing",
+                changelog_category="Added",
+                changelog_entry="Added new thing",
+            )
 
-        results = rewrite_history("/fake/repo", [msg1, msg2])
+            results = rewrite_history("/fake/repo", [msg1, msg2])
+
         assert len(results) == 2
         assert "aaa111" in results
         assert "bbb222" in results

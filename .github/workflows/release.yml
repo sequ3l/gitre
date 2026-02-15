@@ -1,0 +1,90 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            binary: gitre.exe
+            artifact: gitre-windows-amd64.exe
+          - os: ubuntu-latest
+            binary: gitre
+            artifact: gitre-linux-amd64
+          - os: macos-latest            # Apple Silicon (M1+)
+            binary: gitre
+            artifact: gitre-macos-arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Sync version from tag
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          python -c "
+          import re, os
+          v = os.environ['TAG'].lstrip('v')
+          for p, pat, repl in [
+              ('gitre/__init__.py', r'__version__ = \"[^\"]*\"', f'__version__ = \"{v}\"'),
+              ('pyproject.toml', r'^version = \"[^\"]*\"', f'version = \"{v}\"'),
+          ]:
+              t = open(p).read()
+              t = re.sub(pat, repl, t, count=1, flags=re.MULTILINE)
+              open(p, 'w').write(t)
+          print(f'Version synced to {v}')
+          "
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Build executable
+        run: pyinstaller gitre.spec
+
+      - name: Rename artifact
+        shell: bash
+        run: |
+          mv "dist/${{ matrix.binary }}" "dist/${{ matrix.artifact }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            gitre-windows-amd64.exe/gitre-windows-amd64.exe
+            gitre-linux-amd64/gitre-linux-amd64
+            gitre-macos-arm64/gitre-macos-arm64
+          generate_release_notes: true
+          draft: false
+          prerelease: false

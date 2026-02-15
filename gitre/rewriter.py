@@ -1,19 +1,18 @@
 """Git history rewriting using git-filter-repo.
 
 Provides functions to rewrite commit messages in a git repository using
-git-filter-repo's --commit-callback mechanism with hash-based matching.
-Includes backup creation, remote save/restore, user confirmation, changelog
-generation, and rich console display of proposals.
+git-filter-repo's Python library API with hash-based matching via
+``commit.original_id``.  Includes backup creation, remote save/restore,
+user confirmation, changelog generation, and rich console display of proposals.
 """
 
 from __future__ import annotations
 
-import platform
+import os
 import subprocess
-import tempfile
-import textwrap
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -32,19 +31,14 @@ _console = Console()
 # 1. check_filter_repo
 # ---------------------------------------------------------------------------
 def check_filter_repo() -> bool:
-    """Check whether ``git-filter-repo`` is available on the system PATH.
+    """Check whether ``git_filter_repo`` can be imported as a Python module.
 
-    Returns ``True`` if the tool can be invoked, ``False`` otherwise.
+    Returns ``True`` if the library is available, ``False`` otherwise.
     """
     try:
-        result = subprocess.run(
-            ["git", "filter-repo", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        import git_filter_repo  # noqa: F401
+        return True
+    except ImportError:
         return False
 
 
@@ -52,37 +46,8 @@ def check_filter_repo() -> bool:
 # 2. get_install_instructions
 # ---------------------------------------------------------------------------
 def get_install_instructions() -> str:
-    """Return platform-appropriate install instructions for *git-filter-repo*.
-
-    Detects the current OS via :mod:`platform` and provides the most common
-    installation method for that platform.
-    """
-    system = platform.system().lower()
-
-    if system == "darwin":
-        return textwrap.dedent("""\
-            Install git-filter-repo on macOS:
-              brew install git-filter-repo
-            Or via pip:
-              pip install git-filter-repo""")
-    elif system == "linux":
-        return textwrap.dedent("""\
-            Install git-filter-repo on Linux:
-              # Debian / Ubuntu
-              sudo apt-get install git-filter-repo
-              # Fedora
-              sudo dnf install git-filter-repo
-              # Arch
-              sudo pacman -S git-filter-repo
-            Or via pip:
-              pip install git-filter-repo""")
-    else:
-        # Windows or other
-        return textwrap.dedent("""\
-            Install git-filter-repo on Windows:
-              pip install git-filter-repo
-            Or via scoop:
-              scoop install git-filter-repo""")
+    """Return install instructions for *git-filter-repo*."""
+    return "Install git-filter-repo:\n  pip install git-filter-repo"
 
 
 # ---------------------------------------------------------------------------
@@ -120,64 +85,24 @@ def create_backup(repo_path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 4. build_message_callback
+# 4. build_message_callback (kept for backward compatibility)
 # ---------------------------------------------------------------------------
 def build_message_callback(messages: list[GeneratedMessage]) -> str:
-    """Generate a Python callback script for ``--message-callback``.
+    """Return an identity callback string (legacy, unused in production).
 
-    The callback maps original commit messages to new messages by matching
-    on the original message content (since commit hashes change during
-    rewrite).  The *messages* list must carry the ``hash`` field so that
-    we can look up the original commit message for each entry, but the
-    actual matching in the callback is done by message content, not hash.
-
-    .. note::
-
-        When called directly (without original messages resolved), this
-        returns an identity callback (``return message``).  The
-        :func:`rewrite_history` function resolves original messages from
-        git and calls :func:`_build_content_callback_with_originals`
-        to produce the real mapping callback.
-
-    Parameters
-    ----------
-    messages:
-        List of :class:`GeneratedMessage` objects that define the
-        subject (and optional body) for each commit to be rewritten.
-
-    Returns
-    -------
-    str
-        A Python expression/script suitable for passing to
-        ``git filter-repo --message-callback``.
+    Kept for backward compatibility.  The production pipeline uses
+    :func:`_make_commit_callback` which returns a Python callable.
     """
-    # Without knowing the original commit messages we cannot build the
-    # content-based lookup map.  The full pipeline (rewrite_history)
-    # resolves originals from git and uses _build_content_callback_with_originals.
-    # As a standalone call, return a safe identity callback.
     return "return message"
 
 
 def _build_commit_callback(
     hash_map: dict[str, str],
 ) -> str:
-    """Build a ``--commit-callback`` script that matches by original hash.
+    """Build a ``--commit-callback`` script string (legacy).
 
-    Unlike ``--message-callback`` (which only receives the message text),
-    ``--commit-callback`` receives the full commit object including
-    ``commit.original_id`` — the hex hash from before the rewrite.  This
-    avoids the duplicate-key problem when many commits share the same
-    original message (e.g. "etc").
-
-    Parameters
-    ----------
-    hash_map:
-        Mapping of ``{original_full_hash: new_message}``.
-
-    Returns
-    -------
-    str
-        Python code for ``--commit-callback``.
+    Kept for backward compatibility with tests.  The production pipeline
+    uses :func:`_make_commit_callback` instead.
     """
     mapping_entries: list[str] = []
     for old_hash, new_msg in hash_map.items():
@@ -187,8 +112,6 @@ def _build_commit_callback(
 
     mapping_block = "\n".join(mapping_entries)
 
-    # commit.original_id is a bytes hex hash; decode to str for lookup.
-    # commit.message is bytes; we replace it with encoded new message.
     callback = (
         "HASH_MAP = {\n"
         f"{mapping_block}\n"
@@ -199,6 +122,37 @@ def _build_commit_callback(
         "if orig_hex in HASH_MAP:\n"
         "    commit.message = HASH_MAP[orig_hex].encode('utf-8') + b'\\n'\n"
     )
+    return callback
+
+
+def _make_commit_callback(
+    hash_map: dict[str, str],
+) -> Any:
+    """Return a callable commit callback for ``RepoFilter``.
+
+    The callback matches commits by ``original_id`` and replaces
+    their message with the corresponding entry from *hash_map*.
+
+    Parameters
+    ----------
+    hash_map:
+        Mapping of ``{original_full_hash: new_message}``.
+
+    Returns
+    -------
+    Callable
+        A function with signature ``(commit, aux_info) -> None``.
+    """
+    def callback(commit: Any, _aux_info: Any) -> None:
+        orig_id = commit.original_id
+        if isinstance(orig_id, bytes):
+            orig_hex = orig_id.decode("ascii")
+        else:
+            orig_hex = str(orig_id)
+
+        if orig_hex in hash_map:
+            commit.message = hash_map[orig_hex].encode("utf-8") + b"\n"
+
     return callback
 
 
@@ -270,21 +224,21 @@ def rewrite_history(
     repo_path: str,
     messages: list[GeneratedMessage],
 ) -> dict[str, str]:
-    """Rewrite git history using ``git filter-repo --commit-callback``.
+    """Rewrite git history using ``git_filter_repo.RepoFilter``.
 
-    Uses ``--commit-callback`` with hash-based matching via
-    ``commit.original_id``.  This avoids the duplicate-key problem that
-    occurs with ``--message-callback`` when many commits share the same
-    original message (e.g. dozens of "etc" commits).
+    Uses the Python library API with a commit callback that matches
+    by ``commit.original_id``.  This avoids the duplicate-key problem
+    that occurs when many commits share the same original message.
 
     Steps performed:
 
-    1. Verify that ``git-filter-repo`` is installed.
+    1. Verify that ``git_filter_repo`` can be imported.
     2. Create a backup branch via :func:`create_backup`.
-    3. Build a hash → new_message mapping.
-    4. Write callback to a temp file (avoids Windows cmd length limits).
-    5. Execute ``git filter-repo --force --commit-callback <file>``.
-    6. Return a mapping of ``{short_hash: "before -> after"}`` entries.
+    3. Build a hash -> new_message mapping.
+    4. Save remotes (filter-repo strips them).
+    5. Execute ``RepoFilter`` with a commit callback.
+    6. Restore remotes.
+    7. Return a mapping of ``{short_hash: subject}`` entries.
 
     Parameters
     ----------
@@ -296,34 +250,34 @@ def rewrite_history(
     Returns
     -------
     dict[str, str]
-        Mapping of short hashes to human-readable before/after descriptions.
+        Mapping of short hashes to the new commit subjects.
 
     Raises
     ------
     RuntimeError
-        If ``git-filter-repo`` is not installed.
+        If ``git_filter_repo`` cannot be imported.
     subprocess.CalledProcessError
         If any git command fails.
     """
-    # --- 1. Availability check ---
     if not check_filter_repo():
         instructions = get_install_instructions()
         raise RuntimeError(
             f"git-filter-repo is not installed.\n{instructions}"
         )
 
-    # --- 2. Backup ---
+    import git_filter_repo
+
+    # --- 1. Backup ---
     backup_branch = create_backup(repo_path)
     _console.print(
         f"[green]Backup branch created:[/green] {backup_branch}"
     )
 
-    # --- 3. Build hash → new_message mapping ---
+    # --- 2. Build hash -> new_message mapping ---
     hash_map: dict[str, str] = {}
     results: dict[str, str] = {}
 
     for msg in messages:
-        # Compose new message
         if msg.body:
             new_message = f"{msg.subject}\n\n{msg.body}"
         else:
@@ -332,44 +286,23 @@ def rewrite_history(
         hash_map[msg.hash] = new_message
         results[msg.short_hash] = f"{msg.subject}"
 
-    # --- 4. Save remotes (filter-repo strips them) ---
+    # --- 3. Save remotes (filter-repo strips them) ---
     remotes = save_remotes(repo_path)
 
-    # --- 5. Build callback ---
-    callback_script = _build_commit_callback(hash_map)
+    # --- 4. Run filter-repo via Python API ---
+    source = os.path.abspath(repo_path).encode()
+    args = git_filter_repo.FilteringOptions.parse_args(
+        ["--force", "--source", source.decode(), "--target", source.decode()],
+        error_on_empty=False,
+    )
+    commit_callback = _make_commit_callback(hash_map)
+    repo_filter = git_filter_repo.RepoFilter(
+        args,
+        commit_callback=commit_callback,
+    )
+    repo_filter.run()
 
-    # --- 6. Execute rewrite ---
-    # Write callback to a temp file to avoid Windows command-line length
-    # limits (8,191 chars for cmd.exe / ~32K for CreateProcess).  With
-    # many commits the inline callback easily exceeds these limits.
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        suffix=".py",
-        prefix="gitre_callback_",
-        delete=False,
-        encoding="utf-8",
-    ) as tmp:
-        tmp.write(callback_script)
-        callback_file = tmp.name
-
-    try:
-        subprocess.run(
-            [
-                "git",
-                "filter-repo",
-                "--force",
-                "--commit-callback",
-                callback_file,
-            ],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    finally:
-        Path(callback_file).unlink(missing_ok=True)
-
-    # --- 7. Restore remotes ---
+    # --- 5. Restore remotes ---
     if remotes:
         restore_remotes(repo_path, remotes)
 
@@ -379,7 +312,7 @@ def rewrite_history(
 
 
 # ---------------------------------------------------------------------------
-# 6. write_changelog
+# 7. write_changelog
 # ---------------------------------------------------------------------------
 def write_changelog(
     repo_path: str,
@@ -409,7 +342,7 @@ def write_changelog(
 
 
 # ---------------------------------------------------------------------------
-# 9. commit_artifacts
+# 8. commit_artifacts
 # ---------------------------------------------------------------------------
 def commit_artifacts(repo_path: str, changelog_file: str | None = None) -> None:
     """Stage and commit gitre artifacts after a history rewrite.
@@ -464,7 +397,7 @@ def commit_artifacts(repo_path: str, changelog_file: str | None = None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 10. force_push
+# 9. force_push
 # ---------------------------------------------------------------------------
 def force_push(repo_path: str) -> None:
     """Force-push the current branch to the first configured remote.
@@ -510,7 +443,7 @@ def force_push(repo_path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 11. display_proposals
+# 10. display_proposals
 # ---------------------------------------------------------------------------
 def display_proposals(
     messages: list[GeneratedMessage],
@@ -583,7 +516,7 @@ def display_proposals(
 
 
 # ---------------------------------------------------------------------------
-# 8. confirm_rewrite
+# 11. confirm_rewrite
 # ---------------------------------------------------------------------------
 def confirm_rewrite() -> bool:
     """Prompt the user for confirmation before rewriting history.

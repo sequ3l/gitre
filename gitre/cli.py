@@ -612,7 +612,7 @@ def _run_commit_flow(
     except subprocess.CalledProcessError as exc:
         typer.echo(f"Error during history rewrite: {exc}", err=True)
         raise typer.Exit(1)
-    except RuntimeError as exc:
+    except (RuntimeError, SystemExit) as exc:
         typer.echo(f"Error during history rewrite: {exc}", err=True)
         raise typer.Exit(1)
 
