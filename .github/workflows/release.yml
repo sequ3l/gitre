@@ -76,14 +76,12 @@ jobs:
 
       - name: Build Windows installer
         if: runner.os == 'Windows'
-        shell: bash
+        shell: pwsh
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          VERSION="${TAG#v}"
-          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" \
-            /DMyAppVersion="$VERSION" \
-            installers/windows/gitre.iss
+          $version = $env:TAG -replace '^v', ''
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion="$version" installers\windows\gitre.iss
 
       - name: Upload Windows installer
         if: runner.os == 'Windows'
