@@ -10,29 +10,54 @@ Note: The bundled executable still requires `git` to be installed on the
 system PATH.  git-filter-repo is bundled as a Python library.
 """
 
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files, copy_metadata
+from PyInstaller.utils.hooks import (
+    collect_all,
+    collect_data_files,
+    collect_submodules,
+    copy_metadata,
+)
 
 block_cipher = None
 
-# Collect ALL submodules for packages that use dynamic imports
-# (importlib.import_module, lazy loading, conditional imports, etc.)
-# which are invisible to PyInstaller's static analysis.
-hidden = (
+# ---------------------------------------------------------------------------
+# Hidden imports & data files
+# ---------------------------------------------------------------------------
+# Use collect_all for packages that rely on importlib.import_module() with
+# non-standard module names (e.g. hyphens).  collect_submodules alone can't
+# handle these because PyInstaller can't compile module names like
+# "rich._unicode_data.unicode17-0-0" through its normal bytecode path.
+# collect_all bundles the source .py files as data so that
+# importlib.import_module() finds them at runtime.
+
+hidden = []
+extra_datas = []
+extra_binaries = []
+
+for pkg in [
+    'rich',          # _unicode_data uses importlib.import_module with hyphens
+    'typer',
+    'click',
+    'pydantic',
+    'pydantic_core',
+    'httpx',
+    'httpcore',
+    'anyio',
+    'markdown_it',
+    'pygments',
+]:
+    try:
+        datas, binaries, hiddenimports = collect_all(pkg)
+        extra_datas += datas
+        extra_binaries += binaries
+        hidden += hiddenimports
+    except Exception:
+        pass
+
+# Packages where collect_submodules is sufficient (standard import patterns)
+hidden += (
     collect_submodules('gitre')
     + collect_submodules('claude_agent_sdk')
     + collect_submodules('mcp')
-    # rich._unicode_data dynamically loads versioned unicode modules
-    # via importlib.import_module() — must be explicitly collected
-    + collect_submodules('rich')
-    + collect_submodules('typer')
-    + collect_submodules('click')
-    + collect_submodules('pydantic')
-    + collect_submodules('pydantic_core')
-    + collect_submodules('httpx')
-    + collect_submodules('httpcore')
-    + collect_submodules('anyio')
-    + collect_submodules('markdown_it')
-    + collect_submodules('pygments')
     + [
         'git_filter_repo',
         'httpx_sse',
@@ -47,8 +72,9 @@ hidden = (
     ]
 )
 
-# Copy .dist-info metadata for packages that verify their own installation
-# at runtime via importlib.metadata.
+# ---------------------------------------------------------------------------
+# Metadata (.dist-info) for packages that verify installation at runtime
+# ---------------------------------------------------------------------------
 metadata_datas = []
 for pkg in [
     # Direct dependencies
@@ -76,17 +102,25 @@ for pkg in [
     'pyjwt',
     'python-multipart',
     'typing-inspection',
+    # rich transitive
+    'markdown-it-py',
+    'pygments',
+    'mdurl',
 ]:
     try:
         metadata_datas += copy_metadata(pkg)
     except Exception:
         pass  # Package may not be installed in all build environments
 
+# ---------------------------------------------------------------------------
+# Analysis
+# ---------------------------------------------------------------------------
 a = Analysis(
     ['gitre/cli.py'],
     pathex=[],
-    binaries=[],
+    binaries=extra_binaries,
     datas=metadata_datas
+    + extra_datas
     + collect_data_files('certifi')                # CA certs for TLS (httpx/mcp)
     + collect_data_files('jsonschema')              # JSON schema specs
     + collect_data_files('jsonschema_specifications'),
