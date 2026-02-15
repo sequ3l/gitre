@@ -49,6 +49,9 @@ htmlcov/
 Thumbs.db
 desktop.ini
 
+# gitre analysis cache
+.gitre/
+
 # Environment variables
 .env
 .env.local

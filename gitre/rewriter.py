@@ -184,15 +184,41 @@ def save_remotes(repo_path: str) -> dict[str, str]:
 
 
 def restore_remotes(repo_path: str, remotes: dict[str, str]) -> None:
-    """Re-add remotes that were stripped by git-filter-repo."""
+    """Re-add remotes that were stripped by git-filter-repo.
+
+    If a remote already exists (git-filter-repo doesn't always strip them),
+    updates its URL via ``git remote set-url`` instead of failing.
+    """
+    if not remotes:
+        return
+
+    # Discover which remotes already exist
+    existing_result = subprocess.run(
+        ["git", "remote"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    existing = {r.strip() for r in existing_result.stdout.splitlines() if r.strip()}
+
     for name, url in remotes.items():
-        subprocess.run(
-            ["git", "remote", "add", name, url],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        if name in existing:
+            subprocess.run(
+                ["git", "remote", "set-url", name, url],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        else:
+            subprocess.run(
+                ["git", "remote", "add", name, url],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
     if remotes:
         _console.print(
             "[green]Restored remote(s):[/green] "
@@ -347,8 +373,9 @@ def write_changelog(
 def commit_artifacts(repo_path: str, changelog_file: str | None = None) -> None:
     """Stage and commit gitre artifacts after a history rewrite.
 
-    Commits ``.gitre/`` (analysis cache) and the changelog file if provided.
-    No-op if nothing is staged.
+    Commits the changelog file if provided.  The ``.gitre/`` analysis cache
+    is intentionally excluded (it's gitignored) to avoid interference with
+    git-filter-repo rewrites.  No-op if nothing is staged.
 
     Parameters
     ----------
@@ -357,7 +384,7 @@ def commit_artifacts(repo_path: str, changelog_file: str | None = None) -> None:
     changelog_file:
         Path to the changelog file that was written, or ``None``.
     """
-    files_to_add: list[str] = [".gitre/"]
+    files_to_add: list[str] = []
     if changelog_file:
         target = Path(changelog_file)
         if target.is_absolute():
@@ -367,8 +394,11 @@ def commit_artifacts(repo_path: str, changelog_file: str | None = None) -> None:
                 pass
         files_to_add.append(str(target))
 
+    if not files_to_add:
+        return
+
     subprocess.run(
-        ["git", "add", "-f", *files_to_add],
+        ["git", "add", *files_to_add],
         cwd=repo_path,
         capture_output=True,
         text=True,
@@ -387,7 +417,7 @@ def commit_artifacts(repo_path: str, changelog_file: str | None = None) -> None:
         return
 
     subprocess.run(
-        ["git", "commit", "-m", "Add changelog and gitre analysis cache"],
+        ["git", "commit", "-m", "Add changelog"],
         cwd=repo_path,
         capture_output=True,
         text=True,

@@ -408,33 +408,45 @@ class TestRestoreRemotes:
     """Tests for restore_remotes()."""
 
     @patch("gitre.rewriter.subprocess.run")
-    def test_adds_remotes(self, mock_run: MagicMock) -> None:
-        """Should call git remote add for each remote and set upstream."""
+    def test_adds_new_remotes(self, mock_run: MagicMock) -> None:
+        """Should call git remote add when remote doesn't already exist."""
         branch_result = MagicMock(returncode=0)
         branch_result.stdout = "master\n"
         mock_run.side_effect = [
-            MagicMock(returncode=0),  # git remote add
-            branch_result,            # git branch --show-current
-            MagicMock(returncode=0),  # git branch --set-upstream-to
+            MagicMock(returncode=0, stdout=""),  # git remote (no existing)
+            MagicMock(returncode=0),              # git remote add
+            branch_result,                        # git branch --show-current
+            MagicMock(returncode=0),              # git branch --set-upstream-to
         ]
         restore_remotes("/fake/repo", {"origin": "https://example.com/repo.git"})
-        assert mock_run.call_args_list[0][0][0] == [
+        assert mock_run.call_args_list[1][0][0] == [
             "git", "remote", "add", "origin", "https://example.com/repo.git",
         ]
-        assert mock_run.call_args_list[2][0][0] == [
+        assert mock_run.call_args_list[3][0][0] == [
             "git", "branch", "--set-upstream-to", "origin/master",
         ]
 
     @patch("gitre.rewriter.subprocess.run")
-    def test_empty_dict_is_noop(self, mock_run: MagicMock) -> None:
-        """Should not call git remote add when no remotes to restore."""
+    def test_uses_set_url_when_remote_exists(self, mock_run: MagicMock) -> None:
+        """Should call git remote set-url when remote already exists."""
         branch_result = MagicMock(returncode=0)
         branch_result.stdout = "master\n"
-        mock_run.return_value = branch_result
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="origin\n"),  # git remote (already exists)
+            MagicMock(returncode=0),                      # git remote set-url
+            branch_result,                                # git branch --show-current
+            MagicMock(returncode=0),                      # git branch --set-upstream-to
+        ]
+        restore_remotes("/fake/repo", {"origin": "https://example.com/repo.git"})
+        assert mock_run.call_args_list[1][0][0] == [
+            "git", "remote", "set-url", "origin", "https://example.com/repo.git",
+        ]
+
+    @patch("gitre.rewriter.subprocess.run")
+    def test_empty_dict_is_noop(self, mock_run: MagicMock) -> None:
+        """Should not call any git commands when no remotes to restore."""
         restore_remotes("/fake/repo", {})
-        for call in mock_run.call_args_list:
-            args = call[0][0]
-            assert args[0:3] != ["git", "remote", "add"]
+        mock_run.assert_not_called()
 
 
 # ===========================================================================
@@ -446,30 +458,23 @@ class TestCommitArtifacts:
     """Tests for commit_artifacts()."""
 
     @patch("gitre.rewriter.subprocess.run")
-    def test_stages_and_commits(self, mock_run: MagicMock) -> None:
-        """Should stage .gitre/ and commit."""
-        # git add succeeds, git diff --cached returns 1 (changes staged), git commit succeeds
+    def test_noop_without_changelog(self, mock_run: MagicMock) -> None:
+        """Should be a no-op when no changelog_file is provided."""
+        commit_artifacts("/fake/repo")
+        mock_run.assert_not_called()
+
+    @patch("gitre.rewriter.subprocess.run")
+    def test_stages_and_commits_changelog(self, mock_run: MagicMock) -> None:
+        """Should stage and commit changelog file when provided."""
         mock_run.side_effect = [
             MagicMock(returncode=0),  # git add
             MagicMock(returncode=1),  # git diff --cached --quiet (changes exist)
             MagicMock(returncode=0),  # git commit
         ]
-        commit_artifacts("/fake/repo")
-        assert mock_run.call_count == 3
-        # First call is git add
-        assert ".gitre/" in mock_run.call_args_list[0][0][0]
-
-    @patch("gitre.rewriter.subprocess.run")
-    def test_includes_changelog(self, mock_run: MagicMock) -> None:
-        """Should stage changelog file when provided."""
-        mock_run.side_effect = [
-            MagicMock(returncode=0),  # git add
-            MagicMock(returncode=1),  # git diff --cached --quiet
-            MagicMock(returncode=0),  # git commit
-        ]
         commit_artifacts("/fake/repo", changelog_file="CHANGELOG.md")
         add_args = mock_run.call_args_list[0][0][0]
         assert "CHANGELOG.md" in add_args
+        assert ".gitre/" not in add_args
 
     @patch("gitre.rewriter.subprocess.run")
     def test_noop_when_nothing_staged(self, mock_run: MagicMock) -> None:
@@ -478,7 +483,7 @@ class TestCommitArtifacts:
             MagicMock(returncode=0),  # git add
             MagicMock(returncode=0),  # git diff --cached --quiet (nothing staged)
         ]
-        commit_artifacts("/fake/repo")
+        commit_artifacts("/fake/repo", changelog_file="CHANGELOG.md")
         assert mock_run.call_count == 2  # No commit call
 
 

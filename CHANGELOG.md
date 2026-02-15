@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Fix `restore_remotes` crashing with exit status 3 when git-filter-repo doesn't strip existing remotes — now uses `git remote set-url` as a fallback instead of unconditionally calling `git remote add`.
+- Stop tracking `.gitre/` analysis cache in git (now gitignored) to prevent git-filter-repo from rewriting cache files during history rewrites.
+- Stop force-adding `.gitre/` in `commit_artifacts` — only the changelog file is committed after a rewrite.
+
 ### Added
 - Add GitHub Actions release workflow and PyInstaller spec for building standalone executables on Windows (amd64), Linux (amd64), and macOS (arm64). Tag a `v*` release to trigger automated builds and GitHub Release creation.
 
