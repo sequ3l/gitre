@@ -1,5 +1,9 @@
 # gitre
 
+[![CI](https://github.com/sequ3l/gitre/actions/workflows/ci.yml/badge.svg)](https://github.com/sequ3l/gitre/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 Reconstruct meaningful git commit messages and changelogs by analyzing diffs with Claude.
 
 Many repositories accumulate lazy commit messages — "etc", "fix", "wip", "update". **gitre** reads the diffs (the source of truth) and uses Claude to generate proper commit messages and changelogs, then optionally rewrites history with the corrected messages.
