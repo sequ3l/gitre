@@ -101,33 +101,52 @@ gitre uses **Claude Opus 4.6** (`claude-opus-4-6`) with **1M context window** (G
 
 gitre works with any standard Git remote — **GitHub**, **GitLab**, **Azure DevOps**, **Bitbucket**, self-hosted servers, or bare repos. It uses only standard Git operations (`git log`, `git diff`, `git filter-repo`, `git remote`, `git push`) with no platform-specific API calls.
 
+## Quick Start
+
+```bash
+# One-shot: analyze and rewrite history (from repo root)
+gitre analyze --live
+
+# Label staged changes for daily use
+gitre label
+```
+
 ## Usage
 
-### The Full Monty (one shot)
+### One-Shot Rewrite
 
 Analyze, rewrite history, and write changelog — all in one go:
 
 ```bash
-gitre analyze /path/to/repo --live -f CHANGELOG.md
+gitre analyze --live -f CHANGELOG.md
 ```
 
-### Careful Workflow (two steps)
+### Two-Step Workflow
 
 Review proposals before applying:
 
 ```bash
 # Step 1: Analyze and review (cached to .gitre/)
-gitre analyze /path/to/repo
+gitre analyze
 
 # Step 2: Apply proposals + write changelog
-gitre commit /path/to/repo -f CHANGELOG.md
+gitre commit -f CHANGELOG.md
+```
+
+### Interactive Review
+
+Review each proposal individually — accept, skip, or edit:
+
+```bash
+gitre analyze --live -i
+gitre commit -i
 ```
 
 ### Commands
 
-#### `gitre analyze <repo_path>`
+#### `gitre analyze [repo_path]`
 
-Walks the commit history, sends each diff to Claude, and generates proposed commit messages and changelog entries. Results are cached to `.gitre/analysis.json` inside the target repo.
+Walks the commit history, sends each diff to Claude, and generates proposed commit messages and changelog entries. Results are cached to `.gitre/analysis.json` inside the target repo. Defaults to current directory.
 
 | Option | Description |
 |---|---|
@@ -136,9 +155,10 @@ Walks the commit history, sends each diff to Claude, and generates proposed comm
 | `--from` | Starting commit hash or ref (default: root commit) |
 | `--to` | Ending commit hash or ref (default: HEAD) |
 | `--live` | Immediately rewrite history and write changelog |
+| `--interactive` / `-i` | Interactively review each proposal (requires `--live`) |
 | `--out-file` / `-f` | Write changelog to file (e.g. `CHANGELOG.md`) |
 | `--effort` | Thinking effort: `low`, `medium`, `high`, `max` (default: `max`) |
-| `--batch-size` | Commits per Claude call (default: 1) |
+| `--batch-size` | Commits per Claude call (default: `0` = auto-batch by diff size) |
 | `--verbose` / `-v` | Show per-commit hash details during analysis |
 | `--push` | Force-push to remote after rewriting (requires `--live`) |
 
@@ -150,6 +170,7 @@ Applies cached proposals from a previous `gitre analyze`. Does **not** re-call C
 |---|---|
 | `--only` | Comma-separated short hashes to apply |
 | `--skip` | Comma-separated short hashes to skip |
+| `--interactive` / `-i` | Interactively review each proposal (accept/skip/edit) |
 | `--changelog` / `-f` | Also write changelog to this path |
 | `--yes` / `-y` | Skip confirmation prompt |
 | `--push` | Force-push to remote after rewriting history |
@@ -169,27 +190,29 @@ Generate a commit message for staged changes and commit. The day-to-day workflow
 
 ```bash
 # Just the changelog
-gitre analyze /path/to/repo -o changelog -f CHANGELOG.md
+gitre analyze -o changelog -f CHANGELOG.md
 
 # Just the messages
-gitre analyze /path/to/repo -o messages
+gitre analyze -o messages
 
 # Specific commit range
-gitre analyze /path/to/repo --from v0.1.0 --to v0.2.0
+gitre analyze --from v0.1.0 --to v0.2.0
 
-# Max effort for best quality, low effort for speed
-gitre analyze /path/to/repo --effort max
-gitre analyze /path/to/repo --effort low --batch-size 10
+# Low effort for speed with explicit batch size
+gitre analyze --effort low --batch-size 10
 
-# Selective apply
-gitre commit /path/to/repo --only abc1234,def5678
-gitre commit /path/to/repo --skip abc1234
+# Interactive review — accept/skip/edit each proposal
+gitre commit -i
+
+# Selective apply by hash
+gitre commit --only abc1234,def5678
+gitre commit --skip abc1234
 
 # Scripted / CI
-gitre commit /path/to/repo -f CHANGELOG.md -y
+gitre commit -f CHANGELOG.md -y
 
 # One-shot with force-push
-gitre analyze /path/to/repo --live -f CHANGELOG.md --push
+gitre analyze --live -f CHANGELOG.md --push
 ```
 
 ## Safety

@@ -1,6 +1,6 @@
 # gitre Commands
 
-## `gitre analyze <repo_path>`
+## `gitre analyze [repo_path]`
 
 Analyse git history and generate improved commit messages + changelog.
 
@@ -8,7 +8,7 @@ Analyse git history and generate improved commit messages + changelog.
 
 | Argument | Description |
 |---|---|
-| `repo_path` | Path to the git repository to analyse. **Required.** |
+| `repo_path` | Path to the git repository to analyse. Defaults to current directory. |
 
 ### Options
 
@@ -21,9 +21,10 @@ Analyse git history and generate improved commit messages + changelog.
 | `--live` | | | After analysis, immediately rewrite history and write changelog |
 | `--out-file` | `-f` | | Write formatted output to this file |
 | `--effort` | | `max` | Thinking effort level: `low`, `medium`, `high`, `max` |
-| `--batch-size` | | `1` | Commits to analyse per Claude call (higher = faster, possibly less accurate) |
+| `--batch-size` | | `0` | Commits per Claude call. `0` = auto-batch by diff size |
 | `--verbose` | `-v` | | Show per-commit hash details during analysis |
 | `--push` | | | Force-push to remote after rewriting (requires `--live`) |
+| `--interactive` | `-i` | | Interactively review each proposal (requires `--live`) |
 
 ### Examples
 
@@ -74,6 +75,7 @@ Load cached analysis and rewrite git history with improved messages. Does **not*
 | `--changelog` | `-f` | | Write changelog to this file path after rewriting |
 | `--yes` | `-y` | | Skip confirmation prompt (for scripting / CI) |
 | `--push` | | | Force-push to remote after rewriting history |
+| `--interactive` | `-i` | | Interactively review each proposal (accept/skip/edit) |
 
 ### Examples
 

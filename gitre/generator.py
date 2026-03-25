@@ -469,7 +469,7 @@ async def generate_message(
     cwd: str,
     *,
     effort: EffortLevel = "max",
-) -> GeneratedMessage:
+) -> tuple[GeneratedMessage, int, float]:
     """Generate a commit message and changelog entry for a single commit.
 
     Uses Claude Opus 4.6 with adaptive thinking. Prefers
@@ -487,8 +487,8 @@ async def generate_message(
 
     Returns
     -------
-    GeneratedMessage
-        Structured commit message and changelog entry.
+    tuple[GeneratedMessage, int, float]
+        ``(message, total_tokens, total_cost)``.
 
     Raises
     ------
@@ -509,7 +509,7 @@ async def generate_message(
 
     # Prefer structured_output from the SDK (validated JSON)
     if structured_output is not None and isinstance(structured_output, dict):
-        return _parse_single_response(structured_output, commit)
+        return _parse_single_response(structured_output, commit), total_tokens, total_cost
 
     if not text.strip():
         raise RuntimeError(
@@ -524,7 +524,7 @@ async def generate_message(
             )
         raw = raw[0]
 
-    return _parse_single_response(raw, commit)
+    return _parse_single_response(raw, commit), total_tokens, total_cost
 
 
 async def generate_messages_batch(
@@ -559,8 +559,8 @@ async def generate_messages_batch(
 
     # Single commit — delegate to the simpler function
     if len(commits) == 1:
-        msg = await generate_message(commits[0], cwd, effort=effort)
-        return BatchResult(messages=[msg], total_tokens=0, total_cost=0.0)
+        msg, tokens, cost = await generate_message(commits[0], cwd, effort=effort)
+        return BatchResult(messages=[msg], total_tokens=tokens, total_cost=cost)
 
     prompt = _build_batch_prompt(commits)
     text, structured_output, total_tokens, total_cost = await _call_claude(
@@ -603,7 +603,7 @@ async def generate_messages_batch(
                 idx,
             )
             # Fallback: call individually for missing entries
-            msg = await generate_message(commit, cwd, effort=effort)
+            msg, _, _ = await generate_message(commit, cwd, effort=effort)
             messages.append(msg)
 
     return BatchResult(

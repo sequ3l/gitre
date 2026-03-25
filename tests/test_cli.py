@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import typer
 from click.exceptions import Exit as ClickExit
 from typer.testing import CliRunner
 
@@ -142,10 +143,13 @@ class TestValidateGitRepo:
 class TestAnalyzeCommand:
     """Tests for the 'analyze' command."""
 
-    def test_analyze_missing_repo_path(self) -> None:
-        """analyze requires a repo_path argument."""
-        result = runner.invoke(app, ["analyze"])
-        assert result.exit_code != 0
+    def test_analyze_defaults_to_cwd(self) -> None:
+        """analyze defaults to current directory when no repo_path given."""
+        with patch("gitre.cli._validate_git_repo") as mock_validate:
+            mock_validate.side_effect = typer.Exit(1)  # stop early
+            runner.invoke(app, ["analyze"])
+            # Should attempt to validate "." (the default)
+            mock_validate.assert_called_once_with(".")
 
     def test_analyze_invalid_repo_path(self, tmp_path: Path) -> None:
         """'gitre analyze' with an invalid (non-existent) repo_path shows error."""
@@ -1199,6 +1203,100 @@ class TestRunGeneration:
         assert result == [fake_message]
         mock_asyncio_run.assert_called_once()
 
+    @patch("gitre.cli.asyncio.run")
+    def test_auto_batch_generation(
+        self,
+        mock_asyncio_run: MagicMock,
+        fake_commit: CommitInfo,
+        fake_message: GeneratedMessage,
+    ) -> None:
+        """batch_size=0 uses auto-batch generation."""
+        from gitre.cli import _run_generation
+
+        mock_asyncio_run.return_value = [fake_message]
+        result = _run_generation([fake_commit], "/fake/repo", 0, False)
+
+        assert result == [fake_message]
+        mock_asyncio_run.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _auto_batch_commits tests
+# ---------------------------------------------------------------------------
+
+
+class TestAutoBatchCommits:
+    """Tests for the _auto_batch_commits helper."""
+
+    def _make_commit(self, diff_size: int = 100) -> CommitInfo:
+        return CommitInfo(
+            hash="a" * 40,
+            short_hash="a" * 7,
+            author="Test <test@test.com>",
+            date=datetime(2026, 1, 1, tzinfo=UTC),
+            original_message="test",
+            diff_stat="1 file changed",
+            diff_patch="x" * diff_size,
+            files_changed=1,
+            insertions=1,
+            deletions=0,
+        )
+
+    def test_empty_list(self) -> None:
+        from gitre.cli import _auto_batch_commits
+
+        assert _auto_batch_commits([]) == []
+
+    def test_single_commit(self) -> None:
+        from gitre.cli import _auto_batch_commits
+
+        commits = [self._make_commit(1000)]
+        batches = _auto_batch_commits(commits)
+        assert len(batches) == 1
+        assert len(batches[0]) == 1
+
+    def test_small_commits_batched_together(self) -> None:
+        """Many small commits should go into one batch."""
+        from gitre.cli import _auto_batch_commits
+
+        commits = [self._make_commit(1000) for _ in range(10)]
+        batches = _auto_batch_commits(commits)
+        assert len(batches) == 1
+        assert len(batches[0]) == 10
+
+    def test_large_commits_go_solo(self) -> None:
+        """Large commits should each get their own batch."""
+        from gitre.cli import _auto_batch_commits
+
+        commits = [self._make_commit(300_000) for _ in range(3)]
+        batches = _auto_batch_commits(commits)
+        assert len(batches) == 3
+        assert all(len(b) == 1 for b in batches)
+
+    def test_mixed_sizes(self) -> None:
+        """Mixed sizes should group small, isolate large."""
+        from gitre.cli import _auto_batch_commits
+
+        commits = [
+            self._make_commit(1000),    # small
+            self._make_commit(1000),    # small
+            self._make_commit(398_000), # large — pushes past 400K budget
+            self._make_commit(1000),    # small — starts new batch
+        ]
+        batches = _auto_batch_commits(commits)
+        assert len(batches) >= 2
+        # First two small commits fit together
+        assert len(batches[0]) == 2
+
+    def test_max_commits_cap(self) -> None:
+        """Even tiny commits should be capped at _AUTO_BATCH_MAX_COMMITS."""
+        from gitre.cli import _AUTO_BATCH_MAX_COMMITS, _auto_batch_commits
+
+        commits = [self._make_commit(10) for _ in range(50)]
+        batches = _auto_batch_commits(commits)
+        for batch in batches:
+            assert len(batch) <= _AUTO_BATCH_MAX_COMMITS
+
 
 # ---------------------------------------------------------------------------
 # _format_output tests
@@ -1311,7 +1409,8 @@ class TestCLIOptions:
         plain = _strip_ansi(result.output)
         # All documented options must appear
         for opt in ("--output", "--format", "--from", "--to", "--live",
-                     "--out-file", "--effort", "--batch-size", "--verbose", "--push"):
+                     "--out-file", "--effort", "--batch-size", "--verbose", "--push",
+                     "--interactive"):
             assert opt in plain, f"Missing option {opt} in analyze help"
         # The positional argument hint
         assert "repo" in plain.lower()
@@ -1321,7 +1420,7 @@ class TestCLIOptions:
         result = runner.invoke(app, ["commit", "--help"])
         assert result.exit_code == 0
         plain = _strip_ansi(result.output)
-        for opt in ("--only", "--skip", "--changelog", "--yes", "--push"):
+        for opt in ("--only", "--skip", "--changelog", "--yes", "--push", "--interactive"):
             assert opt in plain, f"Missing option {opt} in commit help"
 
     def test_label_help(self) -> None:
@@ -1521,3 +1620,66 @@ class TestLabelCommand:
         # Verify git add -A was called first
         add_call = mock_run.call_args_list[0]
         assert add_call[0][0] == ["git", "add", "-A"]
+
+
+# ---------------------------------------------------------------------------
+# Interactive review tests
+# ---------------------------------------------------------------------------
+
+
+class TestInteractiveReview:
+    """Tests for _interactive_review."""
+
+    def test_accept_all(self, fake_message: GeneratedMessage) -> None:
+        from gitre.cli import _interactive_review
+
+        messages = [fake_message]
+        with patch("gitre.cli.typer.prompt", return_value="a"):
+            result = _interactive_review(messages)
+        assert result == [fake_message]
+
+    def test_skip_all(self, fake_message: GeneratedMessage) -> None:
+        from gitre.cli import _interactive_review
+
+        messages = [fake_message]
+        with patch("gitre.cli.typer.prompt", return_value="s"):
+            result = _interactive_review(messages)
+        assert result == []
+
+    def test_edit_subject(self, fake_message: GeneratedMessage) -> None:
+        from gitre.cli import _interactive_review
+
+        messages = [fake_message]
+        with patch("gitre.cli.typer.prompt", side_effect=["e", "New subject"]):
+            result = _interactive_review(messages)
+        assert len(result) == 1
+        assert result[0].subject == "New subject"
+        # Hash preserved
+        assert result[0].hash == fake_message.hash
+
+    def test_quit_returns_accepted_so_far(
+        self, fake_message: GeneratedMessage,
+    ) -> None:
+        from gitre.cli import _interactive_review
+
+        msg2 = fake_message.model_copy(
+            update={"hash": "b" * 40, "short_hash": "b" * 7},
+        )
+        messages = [fake_message, msg2]
+        # Accept first, quit on second
+        with patch("gitre.cli.typer.prompt", side_effect=["a", "q"]):
+            result = _interactive_review(messages)
+        assert len(result) == 1
+        assert result[0] == fake_message
+
+    def test_interactive_without_live_errors(self) -> None:
+        """--interactive without --live should error."""
+        with patch("gitre.cli._validate_git_repo"):
+            result = runner.invoke(app, ["analyze", "/fake", "--interactive"])
+        assert result.exit_code != 0
+        assert "requires --live" in result.output
+
+    def test_commit_interactive_help(self) -> None:
+        """--interactive should appear in commit help."""
+        result = runner.invoke(app, ["commit", "--help"])
+        assert "--interactive" in _strip_ansi(result.output)

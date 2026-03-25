@@ -469,7 +469,7 @@ class TestGenerateMessage:
             patch("gitre.generator.ResultMessage", _ResultMessageType),
             patch("gitre.generator.SDK_AVAILABLE", True),
         ):
-            msg = await generate_message(sample_commit, "/fake/repo")
+            msg, tokens, cost = await generate_message(sample_commit, "/fake/repo")
 
         # Verify it's the right type
         assert isinstance(msg, GeneratedMessage)
@@ -481,6 +481,9 @@ class TestGenerateMessage:
         # Verify commit hash fields are carried through
         assert msg.hash == sample_commit.hash
         assert msg.short_hash == sample_commit.short_hash
+        # Verify cost info is returned
+        assert tokens == 150
+        assert cost == 0.005
         # Verify query() was called exactly once
         mock_q.assert_called_once()
 
@@ -585,6 +588,9 @@ class TestGenerateMessagesBatch:
         assert len(result.messages) == 1
         assert isinstance(result.messages[0], GeneratedMessage)
         assert result.messages[0].subject == _VALID_SINGLE["subject"]
+        # Single-commit delegation should propagate cost
+        assert result.total_tokens == 80
+        assert result.total_cost == 0.003
 
     async def test_batch_empty_response_raises(
         self,

@@ -9,11 +9,17 @@ All notable changes to this project will be documented in this file.
 - `--effort` CLI option for `analyze` and `label` commands to control thinking effort level (low, medium, high, max). Default: max.
 - Prefer SDK `structured_output` from `ResultMessage` for JSON parsing — falls back to manual multi-strategy extraction when unavailable.
 - Log `stop_reason` from `ResultMessage` with a warning on unexpected values for better diagnostics.
+- `--interactive` / `-i` flag for `analyze --live` and `commit` commands — review each proposal individually with accept/skip/edit/quit.
+- Smart auto-batching (`--batch-size 0`, now the default) — groups commits by diff size (400K char budget, max 20 per batch) for automatic throughput optimization.
+- Running cost display during analysis — progress spinner shows cumulative $ spent, with a total summary after generation.
 
 ### Changed
 - Upgraded Claude Agent SDK dependency from `>=0.1.30` to `>=0.1.50`.
 - Hardcoded model to Claude Opus 4.6 (`claude-opus-4-6`) with 1M context (GA, no beta header, no pricing premium). Removed `--model` CLI option and model parameters from all functions.
 - Increased diff size limits to leverage 1M context: analyzer truncation 50KB→500KB, prompt truncation 200K→800K chars.
+- `analyze` command now defaults `repo_path` to `.` (current directory), matching `commit` and `label`.
+- `--batch-size` default changed from `1` to `0` (auto-batch by diff size).
+- `generate_message` now returns cost info; fixed `BatchResult.total_cost` being always 0 for single-commit batches.
 
 ### Removed
 - `--model` CLI option from `analyze` and `label` commands — gitre now always uses Claude Opus 4.6.

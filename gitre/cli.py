@@ -112,7 +112,7 @@ def _build_tags_dict(commits: list[CommitInfo]) -> dict[str, str]:
 
 @app.command()
 def analyze(
-    repo_path: str = typer.Argument(..., help="Path to the git repository to analyse."),
+    repo_path: str = typer.Argument(".", help="Path to the git repository to analyse."),
     output: OutputFormat = typer.Option(
         OutputFormat.both,
         "--output",
@@ -151,10 +151,10 @@ def analyze(
         help="Thinking effort level: low, medium, high, or max.",
     ),
     batch_size: int = typer.Option(
-        1,
+        0,
         "--batch-size",
-        help="Number of commits to analyse per Claude call (1 = individual).",
-        min=1,
+        help="Commits per Claude call. 0 = auto-batch by diff size (default).",
+        min=0,
     ),
     verbose: bool = typer.Option(
         False,
@@ -167,11 +167,20 @@ def analyze(
         "--push",
         help="Force-push to remote after rewriting (requires --live).",
     ),
+    interactive: bool = typer.Option(
+        False,
+        "--interactive",
+        "-i",
+        help="Interactively review each proposal before rewriting (requires --live).",
+    ),
 ) -> None:
     """Analyse git history and generate improved commit messages + changelog."""
     # --- 0. Validate flag combinations ---
     if push and not live:
         typer.echo("Error: --push requires --live.", err=True)
+        raise typer.Exit(1)
+    if interactive and not live:
+        typer.echo("Error: --interactive requires --live.", err=True)
         raise typer.Exit(1)
 
     # --- 1. Validate repo ---
@@ -291,6 +300,7 @@ def analyze(
         _run_commit_flow(
             repo_path, result, enriched,
             yes=False, changelog_file=out_file, push=push,
+            interactive=interactive,
         )
 
 
@@ -332,6 +342,12 @@ def commit(
         "--push",
         help="Force-push to remote after rewriting history.",
     ),
+    interactive: bool = typer.Option(
+        False,
+        "--interactive",
+        "-i",
+        help="Interactively review each proposal (accept/skip/edit).",
+    ),
 ) -> None:
     """Load cached analysis and rewrite git history with improved messages."""
     # --- 1. Validate repo ---
@@ -371,6 +387,8 @@ def commit(
         raise typer.Exit(0)
 
     # --- 5-8. Run the commit flow with filtered messages ---
+    # --yes overrides --interactive
+    effective_interactive = interactive and not yes
     _run_commit_flow(
         repo_path,
         result,
@@ -379,6 +397,7 @@ def commit(
         changelog_file=changelog,
         filtered_messages=messages,
         push=push,
+        interactive=effective_interactive,
     )
 
 
@@ -514,6 +533,45 @@ def label(
 # ---------------------------------------------------------------------------
 
 
+# Auto-batch budget: max total diff chars per batch
+_AUTO_BATCH_BUDGET = 400_000
+# Quality cap: max commits per batch regardless of diff size
+_AUTO_BATCH_MAX_COMMITS = 20
+
+
+def _auto_batch_commits(commits: list[CommitInfo]) -> list[list[CommitInfo]]:
+    """Group commits into batches that fit within the diff size budget.
+
+    Keeps adding commits to the current batch until total diff chars
+    would exceed the budget or the commit count cap is reached, then
+    starts a new batch.  A single commit that exceeds the budget on
+    its own goes in a solo batch.
+    """
+    batches: list[list[CommitInfo]] = []
+    current_batch: list[CommitInfo] = []
+    current_size = 0
+
+    for commit in commits:
+        # Account for diff + stat + ~500 chars per-commit prompt overhead
+        commit_size = len(commit.diff_patch) + len(commit.diff_stat) + 500
+
+        if current_batch and (
+            current_size + commit_size > _AUTO_BATCH_BUDGET
+            or len(current_batch) >= _AUTO_BATCH_MAX_COMMITS
+        ):
+            batches.append(current_batch)
+            current_batch = [commit]
+            current_size = commit_size
+        else:
+            current_batch.append(commit)
+            current_size += commit_size
+
+    if current_batch:
+        batches.append(current_batch)
+
+    return batches
+
+
 def _run_generation(
     enriched: list[CommitInfo],
     repo_path: str,
@@ -523,10 +581,14 @@ def _run_generation(
     effort: EffortLevel = "max",
     on_progress: Callable[[list[GeneratedMessage]], None] | None = None,
 ) -> list[GeneratedMessage]:
-    """Drive message generation, single or batch, via asyncio.run()."""
+    """Drive message generation, single or batch, via asyncio.run().
+
+    When *batch_size* is ``0`` (the default), commits are grouped
+    automatically by diff size using :func:`_auto_batch_commits`.
+    """
     messages: list[GeneratedMessage] = []
 
-    if batch_size <= 1:
+    if batch_size == 1:
         # Individual generation — always show progress
         with Progress(
             SpinnerColumn(),
@@ -534,47 +596,79 @@ def _run_generation(
             console=_console,
         ) as progress:
             task = progress.add_task("Generating…", total=len(enriched))
+            cumulative_cost = 0.0
 
             async def _generate_singles() -> list[GeneratedMessage]:
+                nonlocal cumulative_cost
                 results: list[GeneratedMessage] = []
                 for c in enriched:
                     if verbose:
                         _console.print(f"  [dim]{c.short_hash}[/dim] {c.original_message[:50]}")
-                    msg = await generator.generate_message(c, cwd=repo_path, effort=effort)
+                    msg, _tokens, cost = await generator.generate_message(
+                        c, cwd=repo_path, effort=effort,
+                    )
                     results.append(msg)
+                    cumulative_cost += cost
+                    progress.update(
+                        task, description=f"Generating… ${cumulative_cost:.2f}",
+                    )
                     progress.advance(task)
                     if on_progress:
                         on_progress(list(results))
                 return results
 
             messages = asyncio.run(_generate_singles())
+            _console.print(
+                f"[green]Generated {len(messages)} message(s)"
+                f" — ${cumulative_cost:.2f} total[/green]"
+            )
     else:
-        # Batch generation
-        total_batches = (len(enriched) + batch_size - 1) // batch_size
+        # Batch generation (auto or fixed)
+        if batch_size == 0:
+            batches = _auto_batch_commits(enriched)
+        else:
+            batches = [
+                enriched[i : i + batch_size]
+                for i in range(0, len(enriched), batch_size)
+            ]
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             console=_console,
         ) as progress:
-            task = progress.add_task("Generating batches…", total=total_batches)
+            task = progress.add_task("Generating batches…", total=len(batches))
+            cumulative_cost = 0.0
 
-            async def _generate_batch() -> list[GeneratedMessage]:
+            async def _generate_batches() -> list[GeneratedMessage]:
+                nonlocal cumulative_cost
                 all_messages: list[GeneratedMessage] = []
-                for i in range(0, len(enriched), batch_size):
-                    batch = enriched[i : i + batch_size]
+                for batch_idx, batch in enumerate(batches, start=1):
                     if verbose:
                         hashes = ", ".join(c.short_hash for c in batch)
-                        _console.print(f"  [dim]Batch: {hashes}[/dim]")
+                        _console.print(f"  [dim]Batch {batch_idx}: {hashes}[/dim]")
                     batch_result = await generator.generate_messages_batch(
                         batch, cwd=repo_path, effort=effort,
                     )
                     all_messages.extend(batch_result.messages)
+                    cumulative_cost += batch_result.total_cost
+                    progress.update(
+                        task,
+                        description=(
+                            f"Generating… batch {batch_idx}/{len(batches)} "
+                            f"({len(batch)} commits) ${cumulative_cost:.2f}"
+                        ),
+                    )
                     progress.advance(task)
                     if on_progress:
                         on_progress(list(all_messages))
                 return all_messages
 
-            messages = asyncio.run(_generate_batch())
+            messages = asyncio.run(_generate_batches())
+            _console.print(
+                f"[green]Generated {len(messages)} message(s)"
+                f" — ${cumulative_cost:.2f} total[/green]"
+            )
 
     return messages
 
@@ -595,6 +689,63 @@ def _format_output(
         return formatter.format_both(messages, commits, tags)
 
 
+def _interactive_review(
+    messages: list[GeneratedMessage],
+    commits: list[CommitInfo] | None = None,
+) -> list[GeneratedMessage]:
+    """Interactively review each proposal — accept, skip, or edit.
+
+    Returns the list of accepted (possibly edited) messages.
+    """
+    # Build a lookup for original messages
+    originals: dict[str, str] = {}
+    if commits:
+        originals = {c.short_hash: c.original_message for c in commits}
+
+    accepted: list[GeneratedMessage] = []
+    for idx, msg in enumerate(messages, start=1):
+        original = originals.get(msg.short_hash, "?")
+        _console.print()
+        _console.print(
+            f"[bold][{idx}/{len(messages)}][/bold] "
+            f"[dim]{msg.short_hash}[/dim]  "
+            f'[red]"{original}"[/red] → [green]"{msg.subject}"[/green]'
+        )
+        if msg.body:
+            _console.print(f"  [dim]Body:[/dim] {msg.body}")
+        _console.print(f"  [magenta]Category:[/magenta] {msg.changelog_category}")
+
+        while True:
+            choice = typer.prompt(
+                "  (a)ccept / (s)kip / (e)dit subject / (q)uit",
+                default="a",
+                show_default=False,
+            ).strip().lower()
+
+            if choice in ("a", ""):
+                accepted.append(msg)
+                _console.print("  [green]Accepted[/green]")
+                break
+            elif choice == "s":
+                _console.print("  [yellow]Skipped[/yellow]")
+                break
+            elif choice == "e":
+                new_subject = typer.prompt("  New subject", default=msg.subject)
+                if len(new_subject) > 72:
+                    new_subject = new_subject[:69] + "..."
+                msg = msg.model_copy(update={"subject": new_subject})
+                accepted.append(msg)
+                _console.print(f"  [green]Accepted (edited):[/green] {new_subject}")
+                break
+            elif choice == "q":
+                _console.print("  [yellow]Stopping — applying accepted so far.[/yellow]")
+                return accepted
+            else:
+                _console.print("  [red]Invalid choice. Use a/s/e/q.[/red]")
+
+    return accepted
+
+
 def _run_commit_flow(
     repo_path: str,
     result: AnalysisResult,
@@ -604,37 +755,19 @@ def _run_commit_flow(
     changelog_file: str | None,
     filtered_messages: list[GeneratedMessage] | None = None,
     push: bool = False,
+    interactive: bool = False,
 ) -> None:
     """Shared commit/rewrite flow used by both the commit command and --live flag.
 
     Steps:
-      1. Display proposals
-      2. Confirm (unless -y)
+      1. Display proposals (or interactive review)
+      2. Confirm (unless -y or interactive)
       3. Check filter-repo availability
       4. Rewrite history (saves/restores remotes internally)
       5. Optionally write changelog
       6. Commit artifacts (changelog + analysis cache)
       7. Report results
       8. Force push (if --push)
-
-    Parameters
-    ----------
-    repo_path:
-        Path to the git repository.
-    result:
-        The cached :class:`AnalysisResult` (used for tags and cache clearing).
-    commits:
-        Optional list of :class:`CommitInfo` for display purposes.
-    yes:
-        If ``True``, skip the confirmation prompt.
-    changelog_file:
-        If provided, write the formatted changelog to this path.
-    filtered_messages:
-        When provided, use these messages instead of ``result.messages``.
-        This allows the ``commit`` command to pass pre-filtered messages
-        (after ``--only``/``--skip`` processing).
-    push:
-        If ``True``, force-push to remote after rewriting.
     """
     messages = list(filtered_messages) if filtered_messages is not None else list(result.messages)
 
@@ -642,14 +775,22 @@ def _run_commit_flow(
         typer.echo("No messages to rewrite.")
         return
 
-    # 1. Display proposals
-    rewriter.display_proposals(messages, commits)
-
-    # 2. Confirm
-    if not yes:
-        if not rewriter.confirm_rewrite():
-            typer.echo("Aborted.")
+    if interactive:
+        # Interactive review replaces display + confirm
+        messages = _interactive_review(messages, commits)
+        if not messages:
+            typer.echo("No proposals accepted. Aborted.")
             raise typer.Exit(0)
+        _console.print(f"\n[cyan]{len(messages)} proposal(s) accepted.[/cyan]")
+    else:
+        # 1. Display proposals
+        rewriter.display_proposals(messages, commits)
+
+        # 2. Confirm
+        if not yes:
+            if not rewriter.confirm_rewrite():
+                typer.echo("Aborted.")
+                raise typer.Exit(0)
 
     # 3. Check filter-repo
     if not rewriter.check_filter_repo():
