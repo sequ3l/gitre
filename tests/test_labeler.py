@@ -86,10 +86,10 @@ class TestBuildLabelPrompt:
         assert '"changelog_category"' in prompt
 
     def test_truncates_large_diffs(self) -> None:
-        large_patch = "x" * 300_000
+        large_patch = "x" * 900_000
         prompt = _build_label_prompt("stat", large_patch)
         assert "[... diff truncated for size ...]" in prompt
-        assert len(prompt) < 300_000
+        assert len(prompt) < 900_000
 
 
 # ---------------------------------------------------------------------------
@@ -117,9 +117,9 @@ class TestGenerateLabel:
         with patch(
             "gitre.labeler._call_claude",
             new_callable=AsyncMock,
-            return_value=(mock_response, 100, 0.01),
+            return_value=(mock_response, None, 100, 0.01),
         ):
-            msg = await generate_label(str(tmp_git_repo), model="opus")
+            msg = await generate_label(str(tmp_git_repo))
 
         assert msg.subject == "Add feature function stub"
         assert msg.changelog_category == "Added"
@@ -132,7 +132,7 @@ class TestGenerateLabel:
     ) -> None:
         """Should raise RuntimeError when staging area is empty."""
         with pytest.raises(RuntimeError, match="No staged changes"):
-            await generate_label(str(tmp_git_repo), model="opus")
+            await generate_label(str(tmp_git_repo))
 
     @pytest.mark.asyncio
     async def test_handles_markdown_fenced_response(
@@ -155,9 +155,9 @@ class TestGenerateLabel:
         with patch(
             "gitre.labeler._call_claude",
             new_callable=AsyncMock,
-            return_value=(fenced, 50, 0.005),
+            return_value=(fenced, None, 50, 0.005),
         ):
-            msg = await generate_label(str(tmp_git_repo), model="opus")
+            msg = await generate_label(str(tmp_git_repo))
 
         assert msg.subject == "Fix variable assignment"
         assert msg.changelog_category == "Fixed"

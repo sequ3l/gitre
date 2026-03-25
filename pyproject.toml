@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gitre"
-version = "0.1.0"
+version = "0.2.0"
 description = "AI-powered Git assistant for intelligent repository management"
 readme = "README.md"
 license = "MIT"
@@ -26,7 +26,7 @@ classifiers = [
 dependencies = [
     "typer[all]>=0.9.0",
     "pydantic>=2.0.0",
-    "claude-agent-sdk>=0.1.30",
+    "claude-agent-sdk>=0.1.50",
     "git-filter-repo>=2.38.0",
 ]
 

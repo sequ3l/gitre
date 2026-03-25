@@ -20,7 +20,7 @@ Analyse git history and generate improved commit messages + changelog.
 | `--to` | | `HEAD` | Inclusive end ref |
 | `--live` | | | After analysis, immediately rewrite history and write changelog |
 | `--out-file` | `-f` | | Write formatted output to this file |
-| `--model` | | `opus` | Claude model to use: `sonnet`, `opus`, `haiku` |
+| `--effort` | | `max` | Thinking effort level: `low`, `medium`, `high`, `max` |
 | `--batch-size` | | `1` | Commits to analyse per Claude call (higher = faster, possibly less accurate) |
 | `--verbose` | `-v` | | Show per-commit hash details during analysis |
 | `--push` | | | Force-push to remote after rewriting (requires `--live`) |
@@ -43,11 +43,11 @@ gitre analyze /path/to/repo -o messages
 # Specific commit range
 gitre analyze /path/to/repo --from v0.1.0 --to v0.2.0
 
-# Use Opus for best quality
-gitre analyze /path/to/repo --model opus
+# Use max effort for best quality
+gitre analyze /path/to/repo --effort max
 
-# Use Haiku with batching for speed
-gitre analyze /path/to/repo --model haiku --batch-size 10
+# Use low effort with batching for speed
+gitre analyze /path/to/repo --effort low --batch-size 10
 
 # Verbose output with token usage
 gitre analyze /path/to/repo -v
@@ -116,7 +116,7 @@ Generate a commit message for staged changes and commit. Unlike `analyze`/`commi
 | `--all` | `-a` | | Stage all changes before generating (like `git commit -a`) |
 | `--yes` | `-y` | | Skip confirmation prompt |
 | `--push` | | | Push to remote after committing |
-| `--model` | | `opus` | Claude model to use: `sonnet`, `opus`, `haiku` |
+| `--effort` | | `max` | Thinking effort level: `low`, `medium`, `high`, `max` |
 
 ### Examples
 
@@ -130,8 +130,8 @@ gitre label . --all
 # Skip confirmation and push
 gitre label . -y --push
 
-# Use a faster/cheaper model
-gitre label . --model sonnet
+# Use max effort for best quality
+gitre label . --effort max
 ```
 
 ---

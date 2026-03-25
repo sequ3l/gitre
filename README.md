@@ -72,8 +72,8 @@ gitre operates in two phases: **analyze** (read diffs, call Claude, cache propos
 ### 1. Analyze — Generate proposals
 
 1. **Walk history** — `git log --reverse` extracts every commit in the range (oldest first)
-2. **Extract diffs** — Each commit's unified diff and `--stat` are pulled via `git diff`. Root commits diff against the empty tree; merge commits are skipped. Patches over 50 KB are truncated.
-3. **Call Claude** — Each diff (or a batch of diffs) is sent to Claude via the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-code-sdk) with a JSON schema requesting an imperative-mood subject line (max 72 chars), optional body, and a categorized changelog entry (Added/Changed/Fixed/Removed/Deprecated/Security).
+2. **Extract diffs** — Each commit's unified diff and `--stat` are pulled via `git diff`. Root commits diff against the empty tree; merge commits are skipped. Patches over 500 KB are truncated.
+3. **Call Claude** — Each diff (or a batch of diffs) is sent to Claude Opus 4.6 via the [Claude Agent SDK](https://pypi.org/project/claude-agent-sdk/) with adaptive thinking, a JSON schema requesting an imperative-mood subject line (max 72 chars), optional body, and a categorized changelog entry (Added/Changed/Fixed/Removed/Deprecated/Security).
 4. **Cache results** — Proposals are saved to `.gitre/analysis.json` inside the target repo so you can review before committing.
 
 ### 2. Commit — Rewrite history
@@ -87,10 +87,12 @@ gitre operates in two phases: **analyze** (read diffs, call Claude, cache propos
 
 ### Claude SDK configuration
 
-gitre calls Claude through the Claude Code CLI. When `ANTHROPIC_API_KEY` is not set in your environment, it automatically uses your Claude Max/Pro subscription — meaning no separate API costs.
+gitre uses **Claude Opus 4.6** (`claude-opus-4-6`) with **1M context window** (GA) and **adaptive thinking** through the Claude Code CLI. When `ANTHROPIC_API_KEY` is not set in your environment, it automatically uses your Claude Max/Pro subscription — meaning no separate API costs.
 
+- **Claude Opus 4.6** with 1M context — handles even the largest diffs without truncation issues
+- **Adaptive thinking** — Claude dynamically allocates reasoning depth; controllable via `--effort` (low/medium/high/max)
 - **`bypassPermissions`** mode with `allowed_tools=["Read"]` — gitre only reads diffs, it doesn't write files through Claude
-- **`output_format`** JSON schemas — for structured, parseable responses
+- **`output_format`** JSON schemas with `structured_output` — for validated, parseable responses
 - **Stripped `ANTHROPIC_API_KEY`** — forces the SDK to use your Max subscription rather than an API key
 - **Low `max_turns` (3)** — gitre only needs Claude to read a diff and produce JSON, not run multi-step workflows
 - **10 MB buffer** — large diffs need room
@@ -135,7 +137,7 @@ Walks the commit history, sends each diff to Claude, and generates proposed comm
 | `--to` | Ending commit hash or ref (default: HEAD) |
 | `--live` | Immediately rewrite history and write changelog |
 | `--out-file` / `-f` | Write changelog to file (e.g. `CHANGELOG.md`) |
-| `--model` | Claude model: `sonnet`, `opus`, `haiku` (default: `opus`) |
+| `--effort` | Thinking effort: `low`, `medium`, `high`, `max` (default: `max`) |
 | `--batch-size` | Commits per Claude call (default: 1) |
 | `--verbose` / `-v` | Show per-commit hash details during analysis |
 | `--push` | Force-push to remote after rewriting (requires `--live`) |
@@ -161,7 +163,7 @@ Generate a commit message for staged changes and commit. The day-to-day workflow
 | `--all` / `-a` | Stage all changes before generating |
 | `--yes` / `-y` | Skip confirmation prompt |
 | `--push` | Push to remote after committing |
-| `--model` | Claude model (default: `opus`) |
+| `--effort` | Thinking effort: `low`, `medium`, `high`, `max` (default: `max`) |
 
 ### More Examples
 
@@ -175,9 +177,9 @@ gitre analyze /path/to/repo -o messages
 # Specific commit range
 gitre analyze /path/to/repo --from v0.1.0 --to v0.2.0
 
-# Opus for best quality, haiku for speed
-gitre analyze /path/to/repo --model opus
-gitre analyze /path/to/repo --model haiku --batch-size 10
+# Max effort for best quality, low effort for speed
+gitre analyze /path/to/repo --effort max
+gitre analyze /path/to/repo --effort low --batch-size 10
 
 # Selective apply
 gitre commit /path/to/repo --only abc1234,def5678

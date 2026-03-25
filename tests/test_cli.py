@@ -1178,7 +1178,7 @@ class TestRunGeneration:
         from gitre.cli import _run_generation
 
         mock_asyncio_run.return_value = [fake_message]
-        result = _run_generation([fake_commit], "/fake/repo", "sonnet", 1, False)
+        result = _run_generation([fake_commit], "/fake/repo", 1, False)
 
         assert result == [fake_message]
         mock_asyncio_run.assert_called_once()
@@ -1194,7 +1194,7 @@ class TestRunGeneration:
         from gitre.cli import _run_generation
 
         mock_asyncio_run.return_value = [fake_message]
-        result = _run_generation([fake_commit], "/fake/repo", "sonnet", 5, False)
+        result = _run_generation([fake_commit], "/fake/repo", 5, False)
 
         assert result == [fake_message]
         mock_asyncio_run.assert_called_once()
@@ -1274,7 +1274,7 @@ class TestCLIOptions:
     @patch("gitre.cli.analyzer.enrich_commit")
     @patch("gitre.cli.analyzer.get_commits")
     @patch("gitre.cli._validate_git_repo")
-    def test_model_option(
+    def test_effort_option(
         self,
         mock_validate: MagicMock,
         mock_get_commits: MagicMock,
@@ -1285,12 +1285,12 @@ class TestCLIOptions:
         fake_commit: CommitInfo,
         fake_message: GeneratedMessage,
     ) -> None:
-        """--model option is accepted."""
+        """--effort option is accepted."""
         mock_get_commits.return_value = [fake_commit]
         mock_enrich.return_value = fake_commit
         mock_asyncio_run.return_value = [fake_message]
 
-        result = runner.invoke(app, ["analyze", "/fake/repo", "--model", "opus"])
+        result = runner.invoke(app, ["analyze", "/fake/repo", "--effort", "max"])
 
         assert result.exit_code == 0
 
@@ -1311,7 +1311,7 @@ class TestCLIOptions:
         plain = _strip_ansi(result.output)
         # All documented options must appear
         for opt in ("--output", "--format", "--from", "--to", "--live",
-                     "--out-file", "--model", "--batch-size", "--verbose", "--push"):
+                     "--out-file", "--effort", "--batch-size", "--verbose", "--push"):
             assert opt in plain, f"Missing option {opt} in analyze help"
         # The positional argument hint
         assert "repo" in plain.lower()
@@ -1329,7 +1329,7 @@ class TestCLIOptions:
         result = runner.invoke(app, ["label", "--help"])
         assert result.exit_code == 0
         plain = _strip_ansi(result.output)
-        for opt in ("--all", "--yes", "--push", "--model"):
+        for opt in ("--all", "--yes", "--push", "--effort"):
             assert opt in plain, f"Missing option {opt} in label help"
 
 

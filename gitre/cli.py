@@ -16,12 +16,14 @@ import sys
 from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
+from typing import cast
 
 import typer
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from gitre import analyzer, cache, formatter, generator, labeler, rewriter
+from gitre.generator import EffortLevel
 from gitre.models import AnalysisResult, CommitInfo, GeneratedMessage
 
 app = typer.Typer(
@@ -143,10 +145,10 @@ def analyze(
         "-f",
         help="Write formatted output to this file.",
     ),
-    model: str = typer.Option(
-        "opus",
-        "--model",
-        help="Claude model to use for analysis.",
+    effort: str = typer.Option(
+        "max",
+        "--effort",
+        help="Thinking effort level: low, medium, high, or max.",
     ),
     batch_size: int = typer.Option(
         1,
@@ -245,8 +247,8 @@ def analyze(
 
         try:
             new_messages = _run_generation(
-                remaining, repo_path, model, batch_size, verbose,
-                on_progress=_save_progress,
+                remaining, repo_path, batch_size, verbose,
+                effort=cast(EffortLevel, effort), on_progress=_save_progress,
             )
         except Exception as exc:
             _console.print(
@@ -408,10 +410,10 @@ def label(
         "--push",
         help="Push to remote after committing.",
     ),
-    model: str = typer.Option(
-        "opus",
-        "--model",
-        help="Claude model to use for label generation.",
+    effort: str = typer.Option(
+        "max",
+        "--effort",
+        help="Thinking effort level: low, medium, high, or max.",
     ),
 ) -> None:
     """Generate a commit message for staged changes and commit."""
@@ -443,7 +445,7 @@ def label(
     _console.print("[cyan]Generating commit message for staged changes…[/cyan]")
 
     async def _gen() -> GeneratedMessage:
-        return await labeler.generate_label(repo_path, model=model)
+        return await labeler.generate_label(repo_path, effort=cast(EffortLevel, effort))
 
     try:
         with Progress(
@@ -515,10 +517,10 @@ def label(
 def _run_generation(
     enriched: list[CommitInfo],
     repo_path: str,
-    model: str,
     batch_size: int,
     verbose: bool,
     *,
+    effort: EffortLevel = "max",
     on_progress: Callable[[list[GeneratedMessage]], None] | None = None,
 ) -> list[GeneratedMessage]:
     """Drive message generation, single or batch, via asyncio.run()."""
@@ -538,7 +540,7 @@ def _run_generation(
                 for c in enriched:
                     if verbose:
                         _console.print(f"  [dim]{c.short_hash}[/dim] {c.original_message[:50]}")
-                    msg = await generator.generate_message(c, cwd=repo_path, model=model)
+                    msg = await generator.generate_message(c, cwd=repo_path, effort=effort)
                     results.append(msg)
                     progress.advance(task)
                     if on_progress:
@@ -564,7 +566,7 @@ def _run_generation(
                         hashes = ", ".join(c.short_hash for c in batch)
                         _console.print(f"  [dim]Batch: {hashes}[/dim]")
                     batch_result = await generator.generate_messages_batch(
-                        batch, cwd=repo_path, model=model
+                        batch, cwd=repo_path, effort=effort,
                     )
                     all_messages.extend(batch_result.messages)
                     progress.advance(task)

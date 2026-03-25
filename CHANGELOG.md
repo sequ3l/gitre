@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Adaptive thinking support (`thinking={"type": "adaptive"}`) for Claude Opus 4.6, enabling dynamic reasoning depth per request.
+- `--effort` CLI option for `analyze` and `label` commands to control thinking effort level (low, medium, high, max). Default: max.
+- Prefer SDK `structured_output` from `ResultMessage` for JSON parsing — falls back to manual multi-strategy extraction when unavailable.
+- Log `stop_reason` from `ResultMessage` with a warning on unexpected values for better diagnostics.
+
+### Changed
+- Upgraded Claude Agent SDK dependency from `>=0.1.30` to `>=0.1.50`.
+- Hardcoded model to Claude Opus 4.6 (`claude-opus-4-6`) with 1M context (GA, no beta header, no pricing premium). Removed `--model` CLI option and model parameters from all functions.
+- Increased diff size limits to leverage 1M context: analyzer truncation 50KB→500KB, prompt truncation 200K→800K chars.
+
+### Removed
+- `--model` CLI option from `analyze` and `label` commands — gitre now always uses Claude Opus 4.6.
+
+### Added (prior)
 - Add incremental save and resume to `gitre analyze` — progress is saved after each commit/batch so interrupted runs (rate limits, crashes, Ctrl+C) can be resumed by re-running the same command. Shows how many commits are cached vs. remaining.
 - Add native OS installers to the release workflow: Windows installer (Inno Setup), macOS `.pkg`, and Linux `.deb`/`.rpm` packages. Installers handle PATH setup automatically. Standalone binaries are still included alongside the installers.
 - Initial release of gitre CLI with analyze and commit commands for AI-powered git commit message generation, Keep a Changelog formatting, cache management, and git history rewriting via git-filter-repo.

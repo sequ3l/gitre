@@ -30,8 +30,11 @@ gitre reconstructs meaningful git commit messages and changelogs by analyzing di
 - Changelog follows Keep a Changelog format (keepachangelog.com)
 
 ## Claude Agent SDK Notes
+- Requires `claude-agent-sdk>=0.1.50`
+- Hardcoded to `claude-opus-4-6` — no model selection, always 1M context
 - Uses `bypassPermissions` mode with `allowed_tools=["Read"]`
 - Strip `ANTHROPIC_API_KEY` from env so it uses Max subscription
-- `output_format` JSON schemas for structured responses
+- `output_format` JSON schemas for structured responses; prefers `structured_output` from `ResultMessage`
+- `thinking={"type": "adaptive"}` with configurable `effort` (low/medium/high/max)
 - `max_turns=3`, `max_buffer_size=10MB`
-- Multi-strategy JSON extraction handles markdown fences and prose wrapping
+- Multi-strategy JSON extraction as fallback when `structured_output` is None

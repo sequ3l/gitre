@@ -192,7 +192,7 @@ def get_diff(
     return diff_stat, diff_patch
 
 
-def truncate_diff(diff_patch: str, max_bytes: int = 50_000) -> str:
+def truncate_diff(diff_patch: str, max_bytes: int = 500_000) -> str:
     """Truncate *diff_patch* if it exceeds *max_bytes*.
 
     The byte length is measured after encoding to UTF-8.  If truncation

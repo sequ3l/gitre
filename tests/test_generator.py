@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -82,11 +83,15 @@ def _make_result_msg(
     cost: float = 0.005,
     input_tokens: int = 100,
     output_tokens: int = 50,
+    structured_output: Any = None,
+    stop_reason: str | None = "end_turn",
 ) -> MagicMock:
-    """Build a mock ``ResultMessage`` with cost/usage data."""
+    """Build a mock ``ResultMessage`` with cost/usage/structured_output data."""
     msg = MagicMock(spec=[])
     msg.total_cost_usd = cost
     msg.usage = {"input_tokens": input_tokens, "output_tokens": output_tokens}
+    msg.structured_output = structured_output
+    msg.stop_reason = stop_reason
     msg.__class__ = _ResultMessageType
     return msg
 
@@ -191,11 +196,11 @@ class TestBuildPrompt:
         assert "- Tags: none" in prompt
 
     def test_truncates_large_diff(self) -> None:
-        huge_diff = "x" * 300_000
+        huge_diff = "x" * 900_000
         commit = _make_commit(diff_patch=huge_diff)
         prompt = _build_prompt(commit)
         assert "[... diff truncated for size ...]" in prompt
-        assert len(prompt) < 300_000
+        assert len(prompt) < 900_000
 
 
 # ===========================================================================
@@ -239,7 +244,7 @@ class TestBuildBatchPrompt:
         assert '"changelog_entry"' in prompt
 
     def test_truncates_large_diff_in_batch(self) -> None:
-        commit = _make_commit(diff_patch="y" * 300_000)
+        commit = _make_commit(diff_patch="y" * 900_000)
         prompt = _build_batch_prompt([commit])
         assert "[... diff truncated for size ...]" in prompt
 
@@ -627,7 +632,6 @@ class TestAnthropicApiKeyStripped:
                 mock_opts_cls.return_value = MagicMock()
                 _build_options(
                     cwd="/fake/repo",
-                    model="sonnet",
                     output_schema={"type": "object"},
                 )
                 # Inspect the env kwarg passed to ClaudeAgentOptions
@@ -654,7 +658,6 @@ class TestAnthropicApiKeyStripped:
                 mock_opts_cls.return_value = MagicMock()
                 _build_options(
                     cwd="/fake/repo",
-                    model="sonnet",
                     output_schema={"type": "object"},
                 )
                 call_kwargs = mock_opts_cls.call_args
@@ -674,7 +677,6 @@ class TestAnthropicApiKeyStripped:
                 mock_opts_cls.return_value = MagicMock()
                 _build_options(
                     cwd="/fake/repo",
-                    model="sonnet",
                     output_schema={"type": "object"},
                 )
                 call_kwargs = mock_opts_cls.call_args

@@ -52,6 +52,9 @@ desktop.ini
 # gitre analysis cache
 .gitre/
 
+# Plans
+.plans/
+
 # Environment variables
 .env
 .env.local

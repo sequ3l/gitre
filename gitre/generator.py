@@ -12,9 +12,12 @@ import logging
 import os
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from gitre.models import CommitInfo, GeneratedMessage
+
+# Valid effort levels for Claude Opus 4.6
+EffortLevel = Literal["low", "medium", "high", "max"]
 
 # --- Import guard: graceful error when SDK not installed ---
 try:
@@ -48,7 +51,7 @@ _SYSTEM_PROMPT = (
 
 # Maximum diff size to send to Claude (characters). Diffs larger than this
 # are truncated to avoid blowing up the context window.
-_MAX_DIFF_CHARS = 200_000
+_MAX_DIFF_CHARS = 800_000
 
 
 @dataclass(frozen=True)
@@ -351,55 +354,65 @@ def _ensure_sdk() -> None:
     if not SDK_AVAILABLE:
         raise RuntimeError(
             "claude-agent-sdk is not installed. "
-            "Install it with: pip install claude-agent-sdk>=0.1.30"
+            "Install it with: pip install claude-agent-sdk>=0.1.50"
         )
 
 
 def _build_options(
     cwd: str,
-    model: str,
     output_schema: dict[str, Any],
+    *,
+    effort: EffortLevel = "max",
 ) -> ClaudeAgentOptions:
     """Build ``ClaudeAgentOptions`` with all required SDK settings.
 
-    Follows every SDK gotcha from the directive:
+    Always uses ``claude-opus-4-6`` with adaptive thinking and 1M context.
+
     - ``bypassPermissions`` with ``allowed_tools=["Read"]``
     - Stripped ``ANTHROPIC_API_KEY`` from env
     - 10 MB ``max_buffer_size``
     - Low ``max_turns`` (3)
     - ``output_format`` for JSON schema
+    - Adaptive thinking with configurable effort level
     """
     return ClaudeAgentOptions(
         system_prompt=_SYSTEM_PROMPT,
         allowed_tools=["Read"],
         permission_mode="bypassPermissions",
         cwd=cwd,
-        model=model,
+        model="claude-opus-4-6",
         max_buffer_size=10 * 1024 * 1024,  # 10 MB
         max_turns=3,
         env={k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"},
         output_format=output_schema,
+        thinking={"type": "adaptive"},
+        effort=effort,
     )
 
 
 async def _call_claude(
     prompt: str,
     cwd: str,
-    model: str,
     output_schema: dict[str, Any],
-) -> tuple[str, int, float]:
-    """Low-level wrapper around ``query()`` that returns (text, tokens, cost).
+    *,
+    effort: EffortLevel = "max",
+) -> tuple[str, Any | None, int, float]:
+    """Low-level wrapper around ``query()``.
+
+    Returns ``(text, structured_output, tokens, cost)``.
 
     Iterates over the async stream of messages, collecting text blocks from
-    ``AssistantMessage`` events and cost/token info from ``ResultMessage``.
+    ``AssistantMessage`` events and cost/token/structured_output info from
+    ``ResultMessage``.
     """
     _ensure_sdk()
 
-    options = _build_options(cwd, model, output_schema)
+    options = _build_options(cwd, output_schema, effort=effort)
 
     output_parts: list[str] = []
     total_cost: float = 0.0
     total_tokens: int = 0
+    structured_output: Any | None = None
 
     async for message in query(prompt=prompt, options=options):
         if isinstance(message, AssistantMessage):
@@ -413,9 +426,13 @@ async def _call_claude(
                 input_tokens = usage.get("input_tokens", 0)
                 output_tokens = usage.get("output_tokens", 0)
                 total_tokens = input_tokens + output_tokens
+            structured_output = getattr(message, "structured_output", None)
+            stop_reason = getattr(message, "stop_reason", None)
+            if stop_reason and stop_reason not in ("end_turn", "tool_use"):
+                logger.warning("Unexpected stop_reason from Claude: %s", stop_reason)
 
     text = "\n".join(output_parts)
-    return text, total_tokens, total_cost
+    return text, structured_output, total_tokens, total_cost
 
 
 def _parse_single_response(
@@ -450,14 +467,14 @@ def _parse_single_response(
 async def generate_message(
     commit: CommitInfo,
     cwd: str,
-    model: str = "sonnet",
+    *,
+    effort: EffortLevel = "max",
 ) -> GeneratedMessage:
     """Generate a commit message and changelog entry for a single commit.
 
-    Calls Claude via ``query()`` with ``ClaudeAgentOptions`` configured per
-    the SDK gotchas. Collects text from ``AssistantMessage`` blocks and
-    cost/tokens from ``ResultMessage``. Parses the response into a
-    ``GeneratedMessage``.
+    Uses Claude Opus 4.6 with adaptive thinking. Prefers
+    ``structured_output`` from the SDK when available, falling back to
+    manual JSON extraction.
 
     Parameters
     ----------
@@ -465,8 +482,8 @@ async def generate_message(
         The commit to analyse.
     cwd:
         Working directory for the Claude agent (typically the repo root).
-    model:
-        Claude model to use (default ``"sonnet"``).
+    effort:
+        Thinking effort level (``"low"``, ``"medium"``, ``"high"``, ``"max"``).
 
     Returns
     -------
@@ -479,8 +496,8 @@ async def generate_message(
         If the SDK is not installed or Claude returns unparseable output.
     """
     prompt = _build_prompt(commit)
-    text, total_tokens, total_cost = await _call_claude(
-        prompt, cwd, model, _SINGLE_OUTPUT_SCHEMA
+    text, structured_output, total_tokens, total_cost = await _call_claude(
+        prompt, cwd, _SINGLE_OUTPUT_SCHEMA, effort=effort,
     )
 
     logger.debug(
@@ -489,6 +506,10 @@ async def generate_message(
         total_tokens,
         total_cost,
     )
+
+    # Prefer structured_output from the SDK (validated JSON)
+    if structured_output is not None and isinstance(structured_output, dict):
+        return _parse_single_response(structured_output, commit)
 
     if not text.strip():
         raise RuntimeError(
@@ -509,13 +530,14 @@ async def generate_message(
 async def generate_messages_batch(
     commits: list[CommitInfo],
     cwd: str,
-    model: str = "sonnet",
+    *,
+    effort: EffortLevel = "max",
 ) -> BatchResult:
     """Generate commit messages for multiple commits in a single Claude call.
 
-    Sends all commits in one prompt, instructing Claude to return a JSON
-    array. Falls back to individual calls if the batch response cannot be
-    parsed.
+    Uses Claude Opus 4.6 with adaptive thinking. Sends all commits in one
+    prompt, instructing Claude to return a JSON array. Falls back to
+    individual calls if the batch response cannot be parsed.
 
     Parameters
     ----------
@@ -523,8 +545,8 @@ async def generate_messages_batch(
         List of commits to analyse.
     cwd:
         Working directory for the Claude agent.
-    model:
-        Claude model to use.
+    effort:
+        Thinking effort level (``"low"``, ``"medium"``, ``"high"``, ``"max"``).
 
     Returns
     -------
@@ -537,12 +559,12 @@ async def generate_messages_batch(
 
     # Single commit — delegate to the simpler function
     if len(commits) == 1:
-        msg = await generate_message(commits[0], cwd, model)
+        msg = await generate_message(commits[0], cwd, effort=effort)
         return BatchResult(messages=[msg], total_tokens=0, total_cost=0.0)
 
     prompt = _build_batch_prompt(commits)
-    text, total_tokens, total_cost = await _call_claude(
-        prompt, cwd, model, _BATCH_OUTPUT_SCHEMA
+    text, structured_output, total_tokens, total_cost = await _call_claude(
+        prompt, cwd, _BATCH_OUTPUT_SCHEMA, effort=effort,
     )
 
     logger.debug(
@@ -551,19 +573,23 @@ async def generate_messages_batch(
         total_cost,
     )
 
-    if not text.strip():
-        raise RuntimeError("Empty response from Claude for batch request")
+    # Prefer structured_output from the SDK (validated JSON array)
+    if structured_output is not None and isinstance(structured_output, list):
+        raw = structured_output
+    else:
+        if not text.strip():
+            raise RuntimeError("Empty response from Claude for batch request")
 
-    raw = _extract_json(text)
+        raw = _extract_json(text)
 
-    # If Claude returned a single object instead of an array, wrap it
-    if isinstance(raw, dict):
-        raw = [raw]
+        # If Claude returned a single object instead of an array, wrap it
+        if isinstance(raw, dict):
+            raw = [raw]
 
-    if not isinstance(raw, list):
-        raise RuntimeError(
-            f"Expected a JSON array from batch response, got {type(raw).__name__}"
-        )
+        if not isinstance(raw, list):
+            raise RuntimeError(
+                f"Expected a JSON array from batch response, got {type(raw).__name__}"
+            )
 
     messages: list[GeneratedMessage] = []
     for idx, commit in enumerate(commits):
@@ -577,7 +603,7 @@ async def generate_messages_batch(
                 idx,
             )
             # Fallback: call individually for missing entries
-            msg = await generate_message(commit, cwd, model)
+            msg = await generate_message(commit, cwd, effort=effort)
             messages.append(msg)
 
     return BatchResult(

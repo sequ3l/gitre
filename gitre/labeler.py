@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from gitre.analyzer import _run_git
 from gitre.generator import (
     _SINGLE_OUTPUT_SCHEMA,
+    EffortLevel,
     _call_claude,
     _extract_json,
     _parse_single_response,
@@ -20,7 +21,7 @@ from gitre.generator import (
 from gitre.models import CommitInfo, GeneratedMessage
 
 # Maximum diff size to send to Claude (characters).
-_MAX_DIFF_CHARS = 200_000
+_MAX_DIFF_CHARS = 800_000
 
 
 def get_staged_diff(repo_path: str) -> tuple[str, str]:
@@ -71,20 +72,20 @@ def _build_label_prompt(diff_stat: str, diff_patch: str) -> str:
 
 async def generate_label(
     repo_path: str,
-    model: str = "opus",
+    *,
+    effort: EffortLevel = "max",
 ) -> GeneratedMessage:
     """Generate a commit message for the currently staged changes.
 
-    Orchestrates: staged diff extraction, prompt building, Claude SDK
-    call, JSON extraction, and response parsing.  Reuses all low-level
-    helpers from :mod:`gitre.generator`.
+    Uses Claude Opus 4.6 with adaptive thinking. Prefers
+    ``structured_output`` from the SDK when available.
 
     Parameters
     ----------
     repo_path:
         Path to the git repository.
-    model:
-        Claude model to use.
+    effort:
+        Thinking effort level (``"low"``, ``"medium"``, ``"high"``, ``"max"``).
 
     Returns
     -------
@@ -103,16 +104,22 @@ async def generate_label(
         raise RuntimeError("No staged changes to label.")
 
     prompt = _build_label_prompt(diff_stat, diff_patch)
-    text, _, _ = await _call_claude(prompt, repo_path, model, _SINGLE_OUTPUT_SCHEMA)
+    text, structured_output, _, _ = await _call_claude(
+        prompt, repo_path, _SINGLE_OUTPUT_SCHEMA, effort=effort,
+    )
 
-    if not text.strip():
-        raise RuntimeError("Empty response from Claude for staged changes.")
+    # Prefer structured_output from the SDK (validated JSON)
+    if structured_output is not None and isinstance(structured_output, dict):
+        raw = structured_output
+    else:
+        if not text.strip():
+            raise RuntimeError("Empty response from Claude for staged changes.")
 
-    raw = _extract_json(text)
-    if isinstance(raw, list):
-        if not raw:
-            raise RuntimeError("Empty JSON array from Claude for staged changes.")
-        raw = raw[0]
+        raw = _extract_json(text)
+        if isinstance(raw, list):
+            if not raw:
+                raise RuntimeError("Empty JSON array from Claude for staged changes.")
+            raw = raw[0]
 
     # Create a placeholder CommitInfo for _parse_single_response
     placeholder = CommitInfo(
