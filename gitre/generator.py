@@ -379,7 +379,7 @@ def _build_options(
         system_prompt=_SYSTEM_PROMPT,
         allowed_tools=["Read"],
         permission_mode="bypassPermissions",
-        cwd=cwd,
+        cwd=os.path.abspath(cwd),
         model="claude-opus-4-6",
         max_buffer_size=10 * 1024 * 1024,  # 10 MB
         max_turns=3,
@@ -414,22 +414,29 @@ async def _call_claude(
     total_tokens: int = 0
     structured_output: Any | None = None
 
-    async for message in query(prompt=prompt, options=options):
-        if isinstance(message, AssistantMessage):
-            for block in message.content:
-                if hasattr(block, "text"):
-                    output_parts.append(block.text)
-        elif isinstance(message, ResultMessage):
-            total_cost = getattr(message, "total_cost_usd", 0.0) or 0.0
-            usage = getattr(message, "usage", None)
-            if usage and isinstance(usage, dict):
-                input_tokens = usage.get("input_tokens", 0)
-                output_tokens = usage.get("output_tokens", 0)
-                total_tokens = input_tokens + output_tokens
-            structured_output = getattr(message, "structured_output", None)
-            stop_reason = getattr(message, "stop_reason", None)
-            if stop_reason and stop_reason not in ("end_turn", "tool_use"):
-                logger.warning("Unexpected stop_reason from Claude: %s", stop_reason)
+    try:
+        async for message in query(prompt=prompt, options=options):
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if hasattr(block, "text"):
+                        output_parts.append(block.text)
+            elif isinstance(message, ResultMessage):
+                total_cost = getattr(message, "total_cost_usd", 0.0) or 0.0
+                usage = getattr(message, "usage", None)
+                if usage and isinstance(usage, dict):
+                    input_tokens = usage.get("input_tokens", 0)
+                    output_tokens = usage.get("output_tokens", 0)
+                    total_tokens = input_tokens + output_tokens
+                structured_output = getattr(message, "structured_output", None)
+                stop_reason = getattr(message, "stop_reason", None)
+                if stop_reason and stop_reason not in ("end_turn", "tool_use"):
+                    logger.warning("Unexpected stop_reason from Claude: %s", stop_reason)
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(
+            f"Claude SDK error: {exc}"
+        ) from exc
 
     text = "\n".join(output_parts)
     return text, structured_output, total_tokens, total_cost

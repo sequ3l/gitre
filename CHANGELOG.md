@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Claude SDK errors (e.g. subprocess exit code 1) now caught and reported cleanly instead of crashing with an unhandled traceback.
+- Resolve `cwd` to absolute path before passing to Claude SDK subprocess, preventing potential working-directory resolution issues with relative paths.
+
 ### Added
 - Adaptive thinking support (`thinking={"type": "adaptive"}`) for Claude Opus 4.6, enabling dynamic reasoning depth per request.
 - `--effort` CLI option for `analyze` and `label` commands to control thinking effort level (low, medium, high, max). Default: max.
